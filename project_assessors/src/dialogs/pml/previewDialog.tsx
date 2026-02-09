@@ -79,7 +79,7 @@ const LandDetailsPreview = ({ details }) => {
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {other_improvements.map((imp, index) => (
                                     <tr key={imp.improvement_id || index}>
-                                        <td className="px-6 py-3 whitespace-nowrap text-gray-900">{imp.improvement_name}</td>
+                                        <td className="px-6 py-3 whitespace-nowrap text-gray-900">{imp.improvement_name ?? imp.name ?? '-'}</td>
                                         <td className="px-6 py-3 whitespace-nowrap text-center">{formatInteger(imp.quantity)}</td>
                                     </tr>
                                 ))}

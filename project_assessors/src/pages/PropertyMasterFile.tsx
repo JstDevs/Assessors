@@ -387,7 +387,7 @@ const PropertyMasterFile: React.FC = () => {
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-center whitespace-nowrap">
-                                                    {property.original ? (
+                                                    {property.original || property.active_faas ? (
                                                         <>
                                                             {property.active_faas? <span className="font-mono text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100">
                                                                                         {property.active_faas}
@@ -413,7 +413,7 @@ const PropertyMasterFile: React.FC = () => {
                                                             <Eye size={18} />
                                                         </button>
                                                         {/* Future Actions placeholders */}
-                                                        {!property.original && 
+                                                        {!(property.original || property.active_faas) && 
                                                         <button 
                                                             className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-slate-100 rounded-lg transition-colors" title="Edit Property"
                                                             onClick={() => handleEdit(property.property_id)}

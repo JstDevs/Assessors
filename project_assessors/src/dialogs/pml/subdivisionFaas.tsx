@@ -553,8 +553,8 @@ export const FAASSubdivisionDialog: React.FC<FAASSubdivisionDialogProps> = ({
                 remarks,
                 subdivided_lots: payloadLots
             });
-            // setSuccess(true);
-            // setRefresh((p: any) => !p);
+            setSuccess(true);
+            setRefresh((p: any) => !p);
         } catch (err: any) {
             console.error(err);
             setError(err.response?.data?.message || "Subdivision failed.");
