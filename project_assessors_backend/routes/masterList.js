@@ -139,7 +139,7 @@ router.put('/update/:id', async (req, res) => {
         description, status,
         details,
         improvements,
-        changed_by // optional: who made the change
+        changed_by //who made the change
     } = req.body;
     const connection = await pool.getConnection();
 

@@ -247,6 +247,307 @@ const router = express.Router();
 // });
 
 
+router.get('/assessment-roll', async (req, res) => {
+    try {
+        const { ry_year, barangay, property_kind, search_term, taxable } = req.query;
+
+        // Base conditions: Assessment roll comes from active Tax Declarations
+        let where = "WHERE td.status = 'ACTIVE'";
+        const params = [];
+
+        if (taxable !== undefined && taxable !== '') {
+            where += " AND td.taxable = ?";
+            params.push(parseInt(taxable));
+        }
+
+        if (ry_year) {
+            where += " AND td.assessment_effectivity_year = ?";
+            params.push(ry_year);
+        }
+
+        if (barangay) {
+            where += " AND td.barangay = ?";
+            params.push(barangay);
+        }
+
+        if (property_kind) {
+            // Use UPPER to ensure 'LAND' from frontend matches 'Land' in DB
+            where += " AND UPPER(td.property_kind) = UPPER(?)";
+            params.push(property_kind);
+        }
+
+        if (search_term) {
+            where += ` AND (
+                td.td_no LIKE ? OR 
+                td.property_identification_no LIKE ? OR 
+                EXISTS (
+                    SELECT 1 FROM taxdeclaration_owners tdo 
+                    WHERE tdo.td_id = td.td_id 
+                    AND CONCAT(tdo.last_name, ' ', tdo.first_name) LIKE ?
+                )
+            )`;
+            const likeTerm = `%${search_term}%`;
+            params.push(likeTerm, likeTerm, likeTerm);
+        }
+
+        const fromJoins = `FROM taxdeclaration td`;
+
+        // Map td_no to arp_no for the frontend expectations
+        const dataSql = `
+            SELECT 
+                td.td_id AS id,
+                td.td_no AS arp_no,
+                td.property_identification_no AS pin,
+                (
+                    SELECT GROUP_CONCAT(CONCAT(last_name, ', ', first_name) SEPARATOR '; ') 
+                    FROM taxdeclaration_owners tdo 
+                    WHERE tdo.td_id = td.td_id
+                ) AS owner_name,
+                (
+                    SELECT address_house_no 
+                    FROM taxdeclaration_owners tdo 
+                    WHERE tdo.td_id = td.td_id 
+                    LIMIT 1
+                ) AS address,
+                td.barangay,
+                td.property_kind,
+                td.taxable,
+                td.status,
+                'N/A' AS actual_use, /* Placeholder, update if actual_use exists natively in td table */
+                td.total_market_value AS market_value,
+                td.total_assessed_value AS assessed_value
+            ${fromJoins}
+            ${where}
+            ORDER BY td.barangay ASC, td.td_no ASC
+        `;
+
+        const aggSql = `
+            SELECT 
+                COUNT(*) AS record_count,
+                COALESCE(SUM(td.total_market_value), 0) AS total_market_value,
+                COALESCE(SUM(td.total_assessed_value), 0) AS total_assessed_value
+            ${fromJoins}
+            ${where}
+        `;
+
+        const [[rows], [aggRows]] = await Promise.all([
+            pool.query(dataSql, params),
+            pool.query(aggSql, params)
+        ]);
+
+        res.json({
+            data: {
+                data: rows,
+                aggregates: {
+                    total_market_value: parseFloat(aggRows[0].total_market_value),
+                    total_assessed_value: parseFloat(aggRows[0].total_assessed_value),
+                    record_count: aggRows[0].record_count
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("Assessment Roll error:", err);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+router.get('/roa', async (req, res) => {
+    try {
+        const { year, barangay, property_kind, search_term, taxable } = req.query;
+
+        // ROA typically pulls from Tax Declarations rather than FAAS directly
+        let where = "WHERE td.status = 'ACTIVE'";
+        const params = [];
+
+        if (taxable !== undefined && taxable !== '') {
+            where += " AND td.taxable = ?";
+            params.push(parseInt(taxable));
+        }
+
+        if (year) {
+            where += " AND td.assessment_effectivity_year = ?";
+            params.push(year);
+        }
+
+        if (barangay) {
+            where += " AND td.barangay = ?";
+            params.push(barangay);
+        }
+
+        if (property_kind) {
+            where += " AND td.property_kind = ?";
+            params.push(property_kind);
+        }
+
+        if (search_term) {
+            where += ` AND (
+                td.td_no LIKE ? OR 
+                td.property_identification_no LIKE ? OR 
+                td.admin_name LIKE ?
+            )`;
+            const likeTerm = `%${search_term}%`;
+            params.push(likeTerm, likeTerm, likeTerm);
+        }
+
+        const fromJoins = `
+            FROM taxdeclaration td
+        `;
+
+        // Subquery efficiently concatenates all owners attached to the TD
+        const dataSql = `
+            SELECT 
+                td.td_id AS id,
+                td.td_no,
+                td.property_identification_no AS pin,
+                (
+                    SELECT GROUP_CONCAT(CONCAT(last_name, ', ', first_name) SEPARATOR '; ') 
+                    FROM taxdeclaration_owners tdo 
+                    WHERE tdo.td_id = td.td_id
+                ) AS owner_name,
+                td.admin_name,
+                td.barangay,
+                td.property_kind,
+                td.taxable,
+                td.status,
+                td.total_market_value AS market_value,
+                td.total_assessed_value AS assessed_value
+            ${fromJoins}
+            ${where}
+            ORDER BY td.barangay ASC, td.td_no ASC
+        `;
+
+        const aggSql = `
+            SELECT 
+                COUNT(*) AS record_count,
+                COALESCE(SUM(td.total_market_value), 0) AS total_market_value,
+                COALESCE(SUM(td.total_assessed_value), 0) AS total_assessed_value
+            ${fromJoins}
+            ${where}
+        `;
+
+        const [[rows], [aggRows]] = await Promise.all([
+            pool.query(dataSql, params),
+            pool.query(aggSql, params)
+        ]);
+
+        res.json({
+            data: {
+                data: rows,
+                aggregates: {
+                    total_market_value: parseFloat(aggRows[0].total_market_value),
+                    total_assessed_value: parseFloat(aggRows[0].total_assessed_value),
+                    record_count: aggRows[0].record_count
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("ROA Report error:", err);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+
+// ---------------------------------------------------------
+// GET /api/reports/roa (Record of Assessments)
+// ---------------------------------------------------------
+router.get('/roa', async (req, res) => {
+    try {
+        const { year, barangay, property_kind, search_term, taxable } = req.query;
+
+        // ROA typically pulls from Tax Declarations rather than FAAS directly
+        let where = "WHERE td.status = 'ACTIVE'";
+        const params = [];
+
+        if (taxable !== undefined && taxable !== '') {
+            where += " AND td.taxable = ?";
+            params.push(parseInt(taxable));
+        }
+
+        if (year) {
+            where += " AND td.assessment_effectivity_year = ?";
+            params.push(year);
+        }
+
+        if (barangay) {
+            where += " AND td.barangay = ?";
+            params.push(barangay);
+        }
+
+        if (property_kind) {
+            where += " AND td.property_kind = ?";
+            params.push(property_kind);
+        }
+
+        if (search_term) {
+            where += ` AND (
+                td.td_no LIKE ? OR 
+                td.property_identification_no LIKE ? OR 
+                td.admin_name LIKE ?
+            )`;
+            const likeTerm = `%${search_term}%`;
+            params.push(likeTerm, likeTerm, likeTerm);
+        }
+
+        const fromJoins = `
+            FROM taxdeclaration td
+        `;
+
+        // Subquery efficiently concatenates all owners attached to the TD
+        const dataSql = `
+            SELECT 
+                td.td_id AS id,
+                td.td_no,
+                td.property_identification_no AS pin,
+                (
+                    SELECT GROUP_CONCAT(CONCAT(last_name, ', ', first_name) SEPARATOR '; ') 
+                    FROM taxdeclaration_owners tdo 
+                    WHERE tdo.td_id = td.td_id
+                ) AS owner_name,
+                td.admin_name,
+                td.barangay,
+                td.property_kind,
+                td.taxable,
+                td.status,
+                td.total_market_value AS market_value,
+                td.total_assessed_value AS assessed_value
+            ${fromJoins}
+            ${where}
+            ORDER BY td.barangay ASC, td.td_no ASC
+        `;
+
+        const aggSql = `
+            SELECT 
+                COUNT(*) AS record_count,
+                COALESCE(SUM(td.total_market_value), 0) AS total_market_value,
+                COALESCE(SUM(td.total_assessed_value), 0) AS total_assessed_value
+            ${fromJoins}
+            ${where}
+        `;
+
+        const [[rows], [aggRows]] = await Promise.all([
+            pool.query(dataSql, params),
+            pool.query(aggSql, params)
+        ]);
+
+        res.json({
+            data: {
+                data: rows,
+                aggregates: {
+                    total_market_value: parseFloat(aggRows[0].total_market_value),
+                    total_assessed_value: parseFloat(aggRows[0].total_assessed_value),
+                    record_count: aggRows[0].record_count
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("ROA Report error:", err);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 
 router.get('/active', async (req, res) => {
     try {
@@ -283,7 +584,7 @@ router.get("/list", async (req, res) => {
 
         // Filters for FAAS table only
         if (faas_type) {
-            where += " AND faas_type = ?";
+            where += " AND fa.faas_type = ?";
             params.push(faas_type);
         }
         if (status) {
@@ -291,11 +592,10 @@ router.get("/list", async (req, res) => {
             params.push(status);
         }
         if (ry_id) {
-            where += " AND ry_id = ?";
+            where += " AND fa.ry_id = ?";
             params.push(ry_id);
         }
-
-        if(property_kind){
+        if (property_kind) {
             where += " AND fa.property_kind = ?";
             params.push(property_kind);
         }
@@ -310,7 +610,7 @@ router.get("/list", async (req, res) => {
         const total = countRows[0].total;
         const totalPages = Math.ceil(total / limit);
 
-        // Data
+        // Data (Added EXISTS subquery for has_taxdec)
         const dataSql = `
             SELECT 
                 fa.faas_id,
@@ -324,20 +624,25 @@ router.get("/list", async (req, res) => {
                 fa.created_by,
                 fa.created_date,
                 fa.property_kind,
-                pm.arp_no
+                pm.arp_no,
+                EXISTS(SELECT 1 FROM taxdeclaration td WHERE td.faas_id = fa.faas_id) AS has_taxdec
             FROM FAAS fa
             LEFT JOIN propertymasterlist pm ON pm.property_id = fa.property_id
             ${where}
-            ORDER BY created_date DESC
+            ORDER BY fa.created_date DESC
             LIMIT ? OFFSET ?
         `;
 
-        // console.log(dataSql);
-
         const [rows] = await pool.query(dataSql, [...params, limit, offset]);
 
+        // MySQL EXISTS returns 1 or 0. We map it to boolean for a cleaner JSON response.
+        const formattedRows = rows.map(row => ({
+            ...row,
+            has_taxdec: !!row.has_taxdec 
+        }));
+
         res.json({
-            data: rows,
+            data: formattedRows,
             pagination: {
                 total_records: total,
                 total_pages: totalPages,
@@ -500,7 +805,6 @@ router.get('/:faas_id', async (req, res) => {
         if(kind === 'Land') data.land = details.land;
         else if(kind === 'Building') data.building = details.building;
         else data.machinery = details.machinery;
-        // console.log(data);
 
         res.json(data);
 
@@ -1689,56 +1993,83 @@ router.post('/destroy', async (req, res) => {
 
 router.post('/improvement', async (req, res) => {
     const conn = await pool.getConnection();
-    try {
 
+    try {
         const {
             faas_id,
-            improvement_items, // [{ improvement_name, qty, unit_value }]
+            improvement_items,
+            removed_improvements,
             improvement_date,
             remarks
         } = req.body;
 
-        if (!faas_id || !Array.isArray(improvement_items))
+        if (!faas_id || !Array.isArray(improvement_items)) {
             return res.status(400).json({ message: 'Missing required fields.' });
+        }
 
         await conn.beginTransaction();
 
-        // Get current FAAS
+        // =====================================
+        // GET ACTIVE FAAS
+        // =====================================
         const [faasRows] = await conn.query(
-            `SELECT * FROM faas WHERE faas_id = ?`,
+            `SELECT * FROM faas WHERE faas_id = ? AND status = 'ACTIVE'`,
             [faas_id]
         );
+
         if (!faasRows.length)
-            return res.status(404).json({ message: 'FAAS not found.' });
+            throw new Error('FAAS not found or inactive.');
 
         const faas = faasRows[0];
         const propertyId = faas.property_id;
 
-        // Ensure LAND only
-        if (faas.property_kind !== 'Land') {
-            return res.status(400).json({
-                message: 'Improvements transaction is only applicable to LAND properties.'
-            });
-        }
+        if (faas.property_kind !== 'Land')
+            throw new Error('Improvement applies to LAND only.');
 
-        // Cancel old FAAS
+        // =====================================
+        // GET LAND_ID FROM PROPERTY
+        // =====================================
+        const [[landRow]] = await conn.query(
+            `SELECT land_id FROM propertyland WHERE property_id = ?`,
+            [propertyId]
+        );
+
+        if (!landRow)
+            throw new Error('Land record not found.');
+
+        const landId = landRow.land_id;
+
+        // =====================================
+        // GET OLD IMPROVEMENTS
+        // =====================================
+        const [oldImprovs] = await conn.query(
+            `SELECT * FROM faasimprovements WHERE faas_id = ?`,
+            [faas_id]
+        );
+
+        // =====================================
+        // CANCEL OLD FAAS
+        // =====================================
         await conn.query(
             `UPDATE faas SET status = 'CANCELLED' WHERE faas_id = ?`,
             [faas_id]
         );
 
-        // Create new FAAS
-        const [newFaas] = await conn.query(
+        // =====================================
+        // CREATE NEW FAAS
+        // =====================================
+        const [newFaasInsert] = await conn.query(
             `INSERT INTO faas
-            (property_id, ry_id, faas_no, faas_type, owner_name, owner_address, lg_code, barangay, lot_no, block_no, arp_no, pin,
-             effectivity_date, previous_faas_id, status, taxable, property_kind, created_by)
-            VALUES (?, ?, '', 'IMPROVEMENT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
-
+            (property_id, ry_id, faas_no, faas_type,
+             lg_code, barangay, lot_no, block_no, arp_no, pin,
+             effectivity_date, previous_faas_id,
+             status, taxable, property_kind, created_by)
+            VALUES (?, ?, '', 'IMPROVEMENT',
+                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, 'ACTIVE', ?, ?, ?)`,
             [
-                faas.property_id,
+                propertyId,
                 faas.ry_id,
-                faas.owner_name,
-                faas.owner_address,
                 faas.lg_code,
                 faas.barangay,
                 faas.lot_no,
@@ -1749,11 +2080,11 @@ router.post('/improvement', async (req, res) => {
                 faas_id,
                 faas.taxable,
                 faas.property_kind,
-                faas.created_by
+                req.user?.username || 'System'
             ]
         );
 
-        const newFaasId = newFaas.insertId;
+        const newFaasId = newFaasInsert.insertId;
         const newFaasNo = `FAAS-${String(newFaasId).padStart(5, '0')}`;
 
         await conn.query(
@@ -1761,384 +2092,176 @@ router.post('/improvement', async (req, res) => {
             [newFaasNo, newFaasId]
         );
 
-        // Duplicate appraisal
-        const [appraisal] = await conn.query(
-            `SELECT * FROM faasappraisal WHERE faas_id = ?`,
-            [faas_id]
+        // =====================================
+        // COPY APPRAISAL / ASSESSMENT / ADJUSTMENTS
+        // =====================================
+        await conn.query(
+            `INSERT INTO faasappraisal
+             (faas_id, classification, subclassification, area, unit_value, base_market_value)
+             SELECT ?, classification, subclassification, area, unit_value, base_market_value
+             FROM faasappraisal WHERE faas_id = ?`,
+            [newFaasId, faas_id]
         );
-        if (appraisal.length) {
-            const a = appraisal[0];
-            await conn.query(
-                `INSERT INTO faasappraisal 
-                 (faas_id, classification, subclassification, area, unit_value, base_market_value)
-                 VALUES (?, ?, ?, ?, ?, ?)`,
-                [newFaasId, a.classification, a.subclassification, a.area, a.unit_value, a.base_market_value]
+
+        await conn.query(
+            `INSERT INTO faasassessment (faas_id, actual_use, market_value, assessment_level)
+             SELECT ?, actual_use, market_value, assessment_level
+             FROM faasassessment WHERE faas_id = ?`,
+            [newFaasId, faas_id]
+        );
+
+        await conn.query(
+            `INSERT INTO faasadjustments (faas_id, factor, adjustment)
+             SELECT ?, factor, adjustment
+             FROM faasadjustments WHERE faas_id = ?`,
+            [newFaasId, faas_id]
+        );
+
+        // =====================================
+        // COMPUTE FINAL IMPROVEMENT STATE
+        // =====================================
+        let finalImprovements = [...oldImprovs];
+
+        if (Array.isArray(removed_improvements) && removed_improvements.length) {
+            finalImprovements = finalImprovements.filter(
+                imp => !removed_improvements.includes(imp.improvement_id)
             );
         }
 
-        // Duplicate assessment
-        const [assessment] = await conn.query(
-            `SELECT * FROM faasassessment WHERE faas_id = ?`,
-            [faas_id]
-        );
-        if (assessment.length) {
-            const ass = assessment[0];
-            await conn.query(
-                `INSERT INTO faasassessment (faas_id, actual_use, market_value, assessment_level)
-                 VALUES (?, ?, ?, ?)`,
-                [newFaasId, ass.actual_use, ass.market_value, ass.assessment_level]
-            );
-        }
-
-        // Duplicate adjustments
-        const [adjustments] = await conn.query(
-            `SELECT * FROM faasadjustments WHERE faas_id = ?`,
-            [faas_id]
-        );
-        for (const adj of adjustments) {
-            await conn.query(
-                `INSERT INTO faasadjustments (faas_id, factor, adjustment)
-                 VALUES (?, ?, ?)`,
-                [newFaasId, adj.factor, adj.adjustment]
-            );
-        }
-
-        // Duplicate PREVIOUS improvements
-        const [oldImprovs] = await conn.query(
-            `SELECT * FROM faasimprovements WHERE faas_id = ?`,
-            [faas_id]
-        );
-        for (const imp of oldImprovs) {
-            await conn.query(
-                `INSERT INTO faasimprovements (faas_id, improvement_name, qty, unit_value)
-                 VALUES (?, ?, ?, ?)`,
-                [newFaasId, imp.improvement_name, imp.qty, imp.unit_value]
-            );
-        }
-
-        // Insert NEW improvements
         for (const newImp of improvement_items) {
+
+            if (newImp.improvement_id) {
+                const index = finalImprovements.findIndex(
+                    imp => imp.improvement_id === newImp.improvement_id
+                );
+
+                if (index !== -1) {
+                    finalImprovements[index].qty = newImp.qty;
+                    if (newImp.unit_value !== undefined)
+                        finalImprovements[index].unit_value = newImp.unit_value;
+                    continue;
+                }
+            }
+
+            finalImprovements.push({
+                improvement_name: newImp.improvement_name,
+                qty: newImp.qty,
+                unit_value: newImp.unit_value || 0
+            });
+        }
+
+        // =====================================
+        // INSERT INTO NEW FAAS IMPROVEMENTS
+        // =====================================
+        for (const imp of finalImprovements) {
             await conn.query(
-                `INSERT INTO faasimprovements (faas_id, improvement_name, qty, unit_value)
+                `INSERT INTO faasimprovements
+                 (faas_id, improvement_name, qty, unit_value)
                  VALUES (?, ?, ?, ?)`,
                 [
                     newFaasId,
-                    newImp.improvement_name,
-                    newImp.qty,
-                    newImp.unit_value
+                    imp.improvement_name,
+                    imp.qty,
+                    imp.unit_value || 0
                 ]
             );
         }
 
+        // =====================================
+        // SYNC LANDOTHERIMPROVEMENTS (IMPORTANT)
+        // =====================================
 
-        //for old improvements
-        //check if the latest faas has other improvements, if not, use  this
-        let oldImprovsHistory;
-        if(oldImprovs.length <= 0){
-            const [temp] = await conn.query(
-                `
-                    SELECT * FROM landotherimprovements 
-                    WHERE land_id IN (
-                        SELECT land_id 
-                        FROM propertyland 
-                        WHERE property_id = ?
-                    );
-                `,
-                [faas.property_id]
+        // Remove old physical improvement state
+        await conn.query(
+            `DELETE FROM landotherimprovements WHERE land_id = ?`,
+            [landId]
+        );
+
+        // Insert new physical state
+        for (const imp of finalImprovements) {
+            await conn.query(
+                `INSERT INTO landotherimprovements
+                 (land_id, name, quantity)
+                 VALUES (?, ?, ?)`,
+                [
+                    landId,
+                    imp.improvement_name,
+                    imp.qty
+                ]
             );
-            oldImprovsHistory = temp;
-        }else{
-            oldImprovsHistory = oldImprovs;
         }
 
+        // =====================================
+        // UPDATE PROPERTY STATUS
+        // =====================================
+        const [[property]] = await conn.query(
+            `SELECT status FROM propertymasterlist WHERE property_id = ?`,
+            [propertyId]
+        );
 
-        // Insert transaction history
+        const oldStatus = property.status;
+
+        await conn.query(
+            `UPDATE propertymasterlist SET status = 'IMPROVED'
+             WHERE property_id = ?`,
+            [propertyId]
+        );
+
+        // =====================================
+        // PROPERTY HISTORY
+        // =====================================
+        const [propHist] = await conn.query(
+            `INSERT INTO property_history(property_id, action, remarks)
+             VALUES (?, 'IMPROVED', ?)`,
+            [propertyId, remarks || 'Improvement transaction applied.']
+        );
+
+        await conn.query(
+            `INSERT INTO property_history_columns
+             (history_id, column_name, old_value, new_value)
+             VALUES (?, 'status', ?, 'IMPROVED')`,
+            [propHist.insertId, oldStatus]
+        );
+
+        // =====================================
+        // FAAS TRANSACTION HISTORY
+        // =====================================
         await conn.query(
             `INSERT INTO faas_transactionhistory
-            (property_id, transaction_type, changed_field, old_value, new_value, remarks, created_by)
-            VALUES (?, 'IMPROVEMENT', 'IMPROVEMENT', ?, ?, ?, ?)`,
-
+            (property_id, transaction_type, changed_field,
+             old_value, new_value, remarks, created_by)
+            VALUES (?, 'IMPROVEMENT', 'IMPROVEMENTS', ?, ?, ?, ?)`,
             [
                 propertyId,
-                JSON.stringify({ faas_no: faas.faas_no, improvements: oldImprovsHistory }),
-                JSON.stringify({
-                    faas_no: newFaasNo,
-                    improvements: [...oldImprovsHistory, ...improvement_items]
-                }),
+                JSON.stringify({ faas_no: faas.faas_no, improvements: oldImprovs }),
+                JSON.stringify({ faas_no: newFaasNo, improvements: finalImprovements }),
                 remarks,
-                faas.created_by
+                req.user?.username || 'System'
             ]
         );
 
         await conn.commit();
 
         res.json({
-            message: 'Improvement FAAS created successfully',
+            message: 'Improvement transaction completed',
             new_faas_id: newFaasId,
-            new_faas_no: newFaasNo,
-            previous_faas_id: faas_id
+            new_faas_no: newFaasNo
         });
 
     } catch (err) {
         await conn.rollback();
         console.log("IMPROVEMENT ERROR:", err);
-        res.status(500).json({ message: 'Improvement failed', error: err.message });
+
+        res.status(500).json({
+            message: 'Improvement failed',
+            error: err.message
+        });
+
     } finally {
         conn.release();
     }
 });
 
-// //old
-// router.post('/subdivision', async (req, res) => {
-//     const conn = await pool.getConnection();
-//     try {
-//         const {
-//             faas_id,
-//             subdivision_date,
-//             remarks,
-//             subdivided_lots
-//         } = req.body;
-
-//         //before copying the faas, I should copy the property
-
-//         console.log(subdivided_lots)
-
-//         if (!faas_id || !Array.isArray(subdivided_lots) || subdivided_lots.length < 2) {
-//             return res.status(400).json({ message: 'Invalid request. At least 2 lots are required.' });
-//         }
-        
-//         await conn.beginTransaction();
-//         //fetch old faas
-//         const [faasRows] = await conn.query(
-//             `SELECT * FROM FAAS WHERE faas_id = ? AND status = 'ACTIVE'`,
-//             [faas_id]
-//         );
-//         const oldFaasId = faas_id;
-//         const oldFaas = faasRows[0];
-//         //set to inactive
-//         await conn.query(
-//             `UPDATE faas SET status='INACTIVE' WHERE property_id=? AND status='ACTIVE'`,
-//             [oldFaasId]
-//         );
-
-//         const [oldProperty] = await conn.query(`SELECT * FROM propertymasterlist WHERE property_id = ?`, [oldFaas.property_id]);
-//         const [oldPropertyLand] = await conn.query(`SELECT land_id, property_id, au_code, psc_code, lot_area FROM propertyland WHERE property_id = ?`, [oldFaas.property_id]);
-//         const oldPropertyData = oldProperty[0];
-//         const oldPropertyLandData = oldPropertyLand[0];
-        
-//         const [oldPropertyImprovements] = await conn.query(`SELECT * FROM landotherimprovements WHERE land_id = ?`, [oldPropertyLandData.land_id]);
-//         const oldPropertyImprovementsData = oldPropertyImprovements;
-
-        
-
-//         const copy = async (table, cols, oldFaasId, keys, vals) => {
-//             await conn.query(
-//                 `INSERT INTO ${table} (${cols})
-//                  SELECT ${keys.reduce((acc, curr)=>acc.replace(curr, '?'), cols)}
-//                  FROM ${table}
-//                  WHERE faas_id = ?`,
-//                 [...vals, oldFaasId]
-//             );
-//         };
-
-//         const newProperties = [];
-
-//         for(const lot of subdivided_lots){  
-//             const [propertyInsert] = await conn.query(`
-//                     INSERT INTO propertymasterlist(arp_no, pin, lg_code, barangay, lot_no, block_no, property_kind, description, status)
-//                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-//                 `,[lot.arp_no, lot.pin, lot.lg_code, lot.barangay, lot.lot_no, lot.block_no, oldPropertyData.property_kind, '', 'ACTIVE'])
-//             const newPropertyId = propertyInsert.insertId;
-            
-//             const [landInsert] = await conn.query(`
-//                     INSERT INTO propertyland(property_id, au_code, psc_code, lot_area)
-//                     VALUES (?, ?, ?, ?)
-//                 `, [newPropertyId, oldPropertyLandData.au_code, oldPropertyLandData.psc_code, lot.area]);
-            
-//             const newLandId = landInsert.insertId;
-//             // console.log(lot.improvements)
-             
-//             for(const improvement of lot.improvements){
-//                 const [res] = await conn.query(`SELECT * FROM faasimprovements WHERE improvement_id = ?`, [improvement])
-//                 await conn.query(`
-//                     INSERT INTO landotherimprovements(land_id, name, quantity)
-//                     VALUES(?, ?, ?)
-//                     `, [newLandId, res[0].improvement_name, res[0].quantity])
-//             }
-
-//             //property owners
-//             for(const o of lot.owner_ids){
-//                 await conn.query(`INSERT INTO 
-//                         property_owners(property_id, owner_id)
-//                     VALUES (?, ?)`, [newPropertyId, o]);
-//             }
-
-//             //new faas
-//              //faas creation
-
-//             const [insert] = await conn.query(
-//                 `INSERT INTO FAAS (
-//                     property_id,
-//                     ry_id,
-//                     faas_no,
-//                     faas_type,
-//                     effectivity_date,
-//                     previous_faas_id,
-//                     property_kind,
-//                     created_by,
-//                     arp_no,
-//                     pin,
-//                     lg_code,
-//                     barangay,
-//                     lot_no,
-//                     block_no, 
-//                     taxable
-//                 ) VALUES (?, ?, '', 'SUBDIVISION', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-//                 [
-//                     newPropertyId,
-//                     oldFaas.ry_id,
-//                     new Date(),
-//                     oldFaas.faas_id,
-//                     oldFaas.property_kind,
-//                     req.user?.username || "System",
-//                     lot.arp_no,
-//                     lot.pin,
-//                     lot.lg_code,
-//                     lot.barangay,
-//                     lot.lot_no,
-//                     lot.block_no,
-//                     oldFaas.taxable
-//                 ]
-//             );
-
-//             const newFaasId = insert.insertId;
-//             const faas_no = `FAAS-${String(newFaasId).padStart(5, '0')}`;
-
-//             newProperties.push(faas_no);
-
-            
-
-//             await conn.query(
-//                 `UPDATE faas SET faas_no=? WHERE faas_id=?`,
-//                 [faas_no, newFaasId]
-//             );
-
-//             for (const o of lot.owner_ids) {
-//                 await conn.query(
-//                     `
-//                     INSERT INTO 
-//                         faas_owners (
-//                             faas_id, 
-//                             last_name, 
-//                             first_name, 
-//                             middle_name, 
-//                             suffix, 
-//                             tin_no, 
-//                             email, 
-//                             address_house_no, 
-//                             owner_id, 
-//                             contact_no
-//                             )
-//                     SELECT ?, last_name, first_name, middle_name, suffix, tin_no, email, address_house_no, owner_id, contact_no
-//                     FROM faas_owners
-//                     WHERE owner_id = ? AND faas_id = ?
-//                     `,
-//                     [
-//                         newFaasId,
-//                         o,
-//                         oldFaasId
-//                     ]
-//                 );
-//             }
-
-//             //details copy
-//             if (oldFaas.property_kind === 'Land') {
-                
-//                 //before copying the faas, I should copy the property
-                
-
-//                 await copy(
-//                     'faasappraisal', 
-//                     'faas_id, classification, subclassification, area, unit_value, base_market_value', 
-//                     oldFaasId, 
-//                     ['faas_id', 'area'], 
-//                     [newFaasId, lot.area]
-//                 );
-//                 await copy(
-//                     'faasassessment', 
-//                     'faas_id, actual_use, market_value, assessment_level',
-//                     oldFaasId,
-//                     ['faas_id'],
-//                     [newFaasId]
-//                 );
-//                 await copy(
-//                     'faasadjustments', 
-//                     'faas_id, factor, adjustment',
-//                     oldFaasId,
-//                     ['faas_id'],
-//                     [newFaasId]
-//                 );
-//                 // this depends if they own it or not
-//                 // await copy(
-//                 //     'faasimprovements', 
-//                 //     'faas_id, improvement_name, qty, unit_value',
-//                 //     oldFaasId,
-//                 //     ['faas_id'],
-//                 //     [newFaasId]
-//                 // );
-//             }
-
-//             const [historyRes] = await conn.query(
-//                 `INSERT INTO property_history(property_id, action, remarks)
-//                 VALUES (?, 'SUBDIVIDED RESULT', 'Parent area have been divided.')`,
-//                 [newPropertyId]
-//             );
-//             const history_id = historyRes.insertId;
-//             await conn.query(
-//                 `INSERT INTO property_history_columns
-//                     (history_id, column_name, old_value, new_value)
-//                     VALUES (?, ?, ?, ?)`,
-//                 [history_id, 'parent_faas', oldFaas.faas_no, faas_no]
-//             );
-//         }
-
-//         const [historyRes] = await conn.query(
-//             `INSERT INTO property_history(property_id, action, remarks)
-//              VALUES (?, 'SUBDIVIDED', 'Property area have been divided.')`,
-//             [oldFaas.property_id]
-//         );
-//         const history_id = historyRes.insertId;
-
-        
-//         await conn.query(
-//             `INSERT INTO property_history_columns
-//                 (history_id, column_name, old_value, new_value)
-//                 VALUES (?, ?, ?, ?)`,
-//             [history_id, 'faas_nos', oldFaas.faas_no, newProperties.join('||')]
-//         );
-
-//         await conn.query(
-//             `UPDATE faas SET status = 'CANCELLED' WHERE faas_id = ?`,
-//             [oldFaasId]
-//         );
-        
-//         // for the propertymasterlist
-//         await conn.query(
-//             `UPDATE propertymasterlist SET status = 'SUBDIVIDED' WHERE property_id = ?`,
-//             [oldPropertyData.property_id]
-//         );
-
-//         // await conn.commit();
-//         // res.json({ message: 'Subdivision successful', generated_records: newGeneratedIds });
-//         res.json({success: 'worked'})
-//     } catch (err) {
-//         await conn.rollback();
-//         console.error("Subdivision Error:", err);
-//         res.status(500).json({ message: 'Subdivision failed', error: err.message });
-//     } finally {
-//         conn.release();
-//     }
-// });
 
 router.post('/subdivision', async (req, res) => {
     const conn = await pool.getConnection();
@@ -2435,6 +2558,7 @@ router.post('/subdivision', async (req, res) => {
 
 router.post('/consolidation', async (req, res) => {
     const conn = await pool.getConnection();
+
     try {
         const {
             faas_ids,
@@ -2444,172 +2568,286 @@ router.post('/consolidation', async (req, res) => {
             new_pin,
             new_lot_no,
             new_block_no,
+            new_lg_code,
             new_barangay,
-            owner_name,
-            owner_address
+            owner_ids,
+            owner_address,
+            new_unit_value,
+            new_classification,
+            new_subclassification
         } = req.body;
 
         if (!Array.isArray(faas_ids) || faas_ids.length < 2) {
-            return res.status(400).json({ message: 'At least 2 FAAS IDs required for consolidation.' });
+            return res.status(400).json({
+                message: 'At least 2 FAAS are required for consolidation.'
+            });
         }
 
         await conn.beginTransaction();
 
-        // 1. Fetch parent FAAS + validate
+        const primaryFaasId = faas_ids[0];
+
+        // ===============================
+        // GET ALL ACTIVE FAAS
+        // ===============================
         const [faasRows] = await conn.query(
-            `SELECT * FROM faas WHERE faas_id IN (?)`,
+            `SELECT * FROM faas 
+             WHERE faas_id IN (?) AND status = 'ACTIVE'`,
             [faas_ids]
         );
+
         if (faasRows.length !== faas_ids.length) {
-            return res.status(404).json({ message: 'One or more FAAS not found.' });
-        }
-        for (const f of faasRows) {
-            if (f.property_kind !== 'Land' || f.status !== 'ACTIVE') {
-                return res.status(400).json({ message: `FAAS ${f.faas_id} is not active land.` });
-            }
+            throw new Error('Some FAAS are not ACTIVE or not found.');
         }
 
-        // 2. Cancel parent FAAS + mark properties consolidated
-        for (const f of faasRows) {
-            await conn.query(`UPDATE faas SET status = 'CANCELLED' WHERE faas_id = ?`, [f.faas_id]);
-            await conn.query(`UPDATE PropertyMasterList SET status = 'CONSOLIDATED' WHERE property_id = ?`, [f.property_id]);
+        const primaryFaas = faasRows.find(f => f.faas_id === primaryFaasId);
+
+        if (!primaryFaas) {
+            throw new Error('Primary FAAS not found.');
         }
 
-        // 3. Aggregate appraisal + assessment + improvements
-        let totalArea = 0, totalBMV = 0, totalMV = 0;
-        const improvementsToCopy = [];
-        let parentAssess = null;
-
-        for (const f of faasRows) {
-            const [appRows] = await conn.query(`SELECT * FROM faasappraisal WHERE faas_id = ?`, [f.faas_id]);
-            if (appRows.length) {
-                totalArea += parseFloat(appRows[0].area);
-                totalBMV += parseFloat(appRows[0].base_market_value);
-            }
-
-            const [assRows] = await conn.query(`SELECT * FROM faasassessment WHERE faas_id = ?`, [f.faas_id]);
-            if (assRows.length) {
-                totalMV += parseFloat(assRows[0].market_value);
-                parentAssess = assRows[0]; // use one as template
-            }
-
-            const [impRows] = await conn.query(`SELECT * FROM faasimprovements WHERE faas_id = ?`, [f.faas_id]);
-            improvementsToCopy.push(...impRows);
-        }
-
-        // 4. Create new PropertyMasterList
-        const [newPropRes] = await conn.query(
-            `INSERT INTO PropertyMasterList 
-            (arp_no, pin, owner_name, owner_address, barangay, lot_no, block_no, lg_code, property_kind, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Land', 'ACTIVE')`,
-            [
-                new_arp_no, new_pin, owner_name, owner_address,
-                new_barangay, new_lot_no, new_block_no,
-                faasRows[0].lg_code
-            ]
+        // ===============================
+        // COMPUTE TOTAL AREA
+        // ===============================
+        const [landRows] = await conn.query(
+            `SELECT pl.lot_area
+             FROM propertyland pl
+             JOIN faas f ON f.property_id = pl.property_id
+             WHERE f.faas_id IN (?)`,
+            [faas_ids]
         );
-        const newPropId = newPropRes.insertId;
 
-        // 5. Create new PropertyLand
-        const [newLandRes] = await conn.query(
-            `INSERT INTO PropertyLand (property_id, au_code, psc_code, lot_area, remarks)
-             VALUES (?, ?, ?, ?, ?)`,
-            [newPropId, 'AU-CONS', 'PSC-CONS', totalArea, remarks]
+        const totalArea = landRows.reduce(
+            (sum, row) => sum + Number(row.lot_area),
+            0
         );
-        const newLandId = newLandRes.insertId;
 
-        // 6. Create new FAAS
-        const [newFaasRes] = await conn.query(
-            `INSERT INTO faas
-            (property_id, ry_id, faas_no, faas_type, owner_name, owner_address, lg_code, arp_no, pin, barangay, lot_no, block_no, effectivity_date, status, property_kind, created_by)
-            VALUES (?, ?, '', 'CONSOLIDATION', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 'Land', ?)`,
+        // ===============================
+        // CREATE NEW PROPERTY
+        // ===============================
+        const [propertyInsert] = await conn.query(
+            `INSERT INTO propertymasterlist
+            (arp_no, pin, lg_code, barangay, lot_no, block_no, property_kind, description, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                newPropId,
-                faasRows[0].ry_id,
-                owner_name, owner_address,
-                faasRows[0].lg_code,
                 new_arp_no,
                 new_pin,
+                new_lg_code,
                 new_barangay,
                 new_lot_no,
                 new_block_no,
-                consolidation_date,
-                faasRows[0].created_by
+                primaryFaas.property_kind,
+                '',
+                'ACTIVE'
             ]
         );
-        const newFaasId = newFaasRes.insertId;
-        const newFaasNo = `FAAS-${String(newFaasId).padStart(5, '0')}`;
-        await conn.query(`UPDATE faas SET faas_no = ? WHERE faas_id = ?`, [newFaasNo, newFaasId]);
 
-        // 7. Insert appraisal + assessment
-        await conn.query(
-            `INSERT INTO faasappraisal (faas_id, classification, subclassification, area, unit_value, base_market_value)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [newFaasId, 'CONSOLIDATED', 'CONSOLIDATED', totalArea, totalBMV / totalArea, totalBMV]
+        const newPropertyId = propertyInsert.insertId;
+
+        // ===============================
+        // GET PRIMARY LAND DATA
+        // ===============================
+        const [[primaryLand]] = await conn.query(
+            `SELECT au_code, psc_code
+             FROM propertyland
+             WHERE property_id = ?`,
+            [primaryFaas.property_id]
         );
 
-        await conn.query(
-            `INSERT INTO faasassessment (faas_id, actual_use, market_value, assessment_level)
+        // ===============================
+        // CREATE NEW LAND (TOTAL AREA)
+        // ===============================
+        const [landInsert] = await conn.query(
+            `INSERT INTO propertyland
+             (property_id, au_code, psc_code, lot_area)
              VALUES (?, ?, ?, ?)`,
-            [newFaasId, parentAssess.actual_use, totalMV, parentAssess.assessment_level]
+            [
+                newPropertyId,
+                primaryLand.au_code,
+                primaryLand.psc_code,
+                totalArea
+            ]
         );
 
-        // 8. Copy improvements into FAASImprovements + LandOtherImprovements
-        for (const imp of improvementsToCopy) {
-            await conn.query(
-                `INSERT INTO faasimprovements (faas_id, improvement_name, qty, unit_value)
-                 VALUES (?, ?, ?, ?)`,
-                [newFaasId, imp.improvement_name, imp.qty, imp.unit_value]
-            );
-            await conn.query(
-                `INSERT INTO LandOtherImprovements (land_id, improvement_name, quantity, unit_value, remarks)
-                 VALUES (?, ?, ?, ?, ?)`,
-                [newLandId, imp.improvement_name, imp.qty, imp.unit_value, imp.remarks]
-            );
-        }
+        const newLandId = landInsert.insertId;
 
-        // 9. History
-        for (const f of faasRows) {
-            await conn.query(
-                `INSERT INTO faas_transactionhistory
-                (property_id, transaction_type, changed_field, old_value, new_value, remarks, created_by)
-                VALUES (?, 'CONSOLIDATION_SOURCE', 'STATUS', ?, ?, ?, ?)`,
-                [
-                    f.property_id,
-                    JSON.stringify({ status: 'ACTIVE' }),
-                    JSON.stringify({ status: 'CONSOLIDATED', consolidated_into: newPropId }),
-                    remarks,
-                    f.created_by
-                ]
-            );
-        }
+        // ===============================
+        // CREATE NEW FAAS
+        // ===============================
+        const [faasInsert] = await conn.query(
+            `INSERT INTO faas(
+                property_id, ry_id, faas_no, faas_type,
+                effectivity_date, previous_faas_id,
+                property_kind, created_by, arp_no, pin,
+                lg_code, barangay, lot_no, block_no, taxable
+            )
+            VALUES (?, ?, '', 'CONSOLIDATION', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                newPropertyId,
+                primaryFaas.ry_id,
+                consolidation_date,
+                primaryFaasId,
+                primaryFaas.property_kind,
+                req.user?.username || 'System',
+                new_arp_no,
+                new_pin,
+                new_lg_code,
+                new_barangay,
+                new_lot_no,
+                new_block_no,
+                primaryFaas.taxable
+            ]
+        );
+
+        const newFaasId = faasInsert.insertId;
+        const faasNo = `FAAS-${String(newFaasId).padStart(5, '0')}`;
 
         await conn.query(
-            `INSERT INTO faas_transactionhistory
-            (property_id, transaction_type, changed_field, old_value, new_value, remarks, created_by)
-            VALUES (?, 'CONSOLIDATION_RESULT', 'STATUS', ?, ?, ?, ?)`,
+            `UPDATE faas SET faas_no = ? WHERE faas_id = ?`,
+            [faasNo, newFaasId]
+        );
+
+        // ===============================
+        // MERGE IMPROVEMENTS (SUM QTY)
+        // ===============================
+        const mergedImprovements = {};
+
+        for (const faasId of faas_ids) {
+            const [imps] = await conn.query(
+                `SELECT improvement_name, qty
+                 FROM faasimprovements
+                 WHERE faas_id = ?`,
+                [faasId]
+            );
+
+            for (const imp of imps) {
+                if (!mergedImprovements[imp.improvement_name]) {
+                    mergedImprovements[imp.improvement_name] = 0;
+                }
+
+                mergedImprovements[imp.improvement_name] += Number(imp.qty);
+            }
+        }
+
+        for (const [name, qty] of Object.entries(mergedImprovements)) {
+
+            await conn.query(
+                `INSERT INTO landotherimprovements(land_id, name, quantity)
+                 VALUES (?, ?, ?)`,
+                [newLandId, name, qty]
+            );
+
+            await conn.query(
+                `INSERT INTO faasimprovements(faas_id, improvement_name, qty)
+                 VALUES (?, ?, ?)`,
+                [newFaasId, name, qty]
+            );
+        }
+
+        // ===============================
+        // INSERT APPRAISAL (NEW VALUES)
+        // ===============================
+        const unitValue = Number(new_unit_value);
+        const baseMarketValue = totalArea * unitValue;
+
+        await conn.query(
+            `INSERT INTO faasappraisal
+             (faas_id, classification, subclassification, area, unit_value, base_market_value)
+             VALUES (?, ?, ?, ?, ?, ?)`,
             [
-                newPropId,
-                JSON.stringify({ consolidated_from: faas_ids }),
-                JSON.stringify({ status: 'ACTIVE', faas_id: newFaasId, faas_no: newFaasNo }),
-                remarks,
-                faasRows[0].created_by
+                newFaasId,
+                new_classification,
+                new_subclassification,
+                totalArea,
+                unitValue,
+                baseMarketValue
             ]
+        );
+
+        // ===============================
+        // OWNERS
+        // ===============================
+        for (const ownerId of owner_ids) {
+
+            await conn.query(
+                `INSERT INTO property_owners(property_id, owner_id)
+                 VALUES (?, ?)`,
+                [newPropertyId, ownerId]
+            );
+
+            await conn.query(
+                `INSERT INTO faas_owners(
+                    faas_id, last_name, first_name, middle_name,
+                    suffix, tin_no, email, address_house_no,
+                    owner_id, contact_no
+                )
+                SELECT ?, last_name, first_name, middle_name,
+                       suffix, tin_no, email, ?, owner_id, contact_no
+                FROM faas_owners
+                WHERE owner_id = ?
+                LIMIT 1`,
+                [newFaasId, owner_address, ownerId]
+            );
+        }
+
+        // ===============================
+        // HISTORY (NEW PROPERTY)
+        // ===============================
+        const [histInsert] = await conn.query(
+            `INSERT INTO property_history(property_id, action, remarks)
+             VALUES (?, 'CONSOLIDATED RESULT', ?)`,
+            [newPropertyId, remarks || 'Properties merged.']
+        );
+
+        await conn.query(
+            `INSERT INTO property_history_columns
+             (history_id, column_name, old_value, new_value)
+             VALUES (?, ?, ?, ?)`,
+            [
+                histInsert.insertId,
+                'merged_faas',
+                faas_ids.join('||'),
+                faasNo
+            ]
+        );
+
+        // ===============================
+        // DEACTIVATE OLD FAAS
+        // ===============================
+        await conn.query(
+            `UPDATE faas SET status = 'CANCELLED'
+             WHERE faas_id IN (?)`,
+            [faas_ids]
+        );
+
+        // ===============================
+        // MARK OLD PROPERTIES CONSOLIDATED
+        // ===============================
+        await conn.query(
+            `UPDATE propertymasterlist SET status = 'CONSOLIDATED'
+             WHERE property_id IN (
+                SELECT property_id FROM faas WHERE faas_id IN (?)
+             )`,
+            [faas_ids]
         );
 
         await conn.commit();
+
         res.json({
-            message: 'Consolidation successful',
-            new_property_id: newPropId,
-            new_land_id: newLandId,
-            new_faas_id: newFaasId,
-            new_faas_no: newFaasNo
+            success: true,
+            generated_faas: faasNo,
+            total_area: totalArea
         });
 
     } catch (err) {
         await conn.rollback();
-        console.error(err);
-        res.status(500).json({ message: 'Consolidation failed', error: err.message });
+        console.error('Consolidation Error:', err);
+
+        res.status(500).json({
+            message: 'Consolidation failed',
+            error: err.message
+        });
+
     } finally {
         conn.release();
     }
@@ -2622,6 +2860,7 @@ router.post('/revision', async (req, res) => {
         faas_id,
         revision_date,
         remarks,
+        owner_ids,
         master_data,
         faas_core,
         specific_data,
@@ -2636,27 +2875,36 @@ router.post('/revision', async (req, res) => {
 
         await conn.beginTransaction();
 
-        // 1. Fetch current FAAS
-        const [faasRows] = await conn.query(`SELECT * FROM faas WHERE faas_id = ?`, [faas_id]);
-        if (!faasRows.length) return res.status(404).json({ message: 'FAAS not found.' });
-        const oldFaas = faasRows[0];
+        // 1. Get old FAAS
+        const [oldFaasRows] = await conn.query(
+        `SELECT * FROM faas WHERE faas_id = ?`,
+        [faas_id]
+        );
+        if (!oldFaasRows.length)
+        return res.status(404).json({ message: 'FAAS not found.' });
+
+        const oldFaas = oldFaasRows[0];
+        const propertyId = oldFaas.property_id;
 
         // 2. Cancel old FAAS
-        await conn.query(`UPDATE faas SET status = 'CANCELLED' WHERE faas_id = ?`, [faas_id]);
+        await conn.query(
+        `UPDATE faas SET status='CANCELLED' WHERE faas_id=?`,
+        [faas_id]
+        );
 
         // 3. Create new FAAS
         const [newFaasRes] = await conn.query(
         `INSERT INTO faas
-        (property_id, ry_id, faas_no, arp_no, pin, faas_type, owner_name, owner_address, lg_code, barangay, lot_no, block_no,
-            effectivity_date, previous_faas_id, status, taxable, property_kind, created_by)
-        VALUES (?, ?, '', ?, ?, 'REVISION', ?, ?, ? ,? ,? , ?, ?, ?, 'ACTIVE', ?, ?, ?)`,
+        (property_id, ry_id, faas_no, arp_no, pin, lg_code, barangay,
+        lot_no, block_no, faas_type, effectivity_date,
+        previous_faas_id, status, taxable, property_kind, created_by)
+        VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 'REVISION',
+                ?, ?, 'ACTIVE', ?, ?, ?)`,
         [
-            oldFaas.property_id,
+            propertyId,
             faas_core.ry_id,
             master_data.arp_no,
             master_data.pin,
-            master_data.owner_name,
-            master_data.owner_address,
             master_data.lg_code,
             master_data.barangay,
             master_data.lot_no,
@@ -2668,25 +2916,89 @@ router.post('/revision', async (req, res) => {
             oldFaas.created_by
         ]
         );
+
         const newFaasId = newFaasRes.insertId;
         const newFaasNo = `FAAS-${String(newFaasId).padStart(5, '0')}`;
-        await conn.query(`UPDATE faas SET faas_no = ? WHERE faas_id = ?`, [newFaasNo, newFaasId]);
 
-        // 4. Insert specific data based on property kind
+        await conn.query(
+        `UPDATE faas SET faas_no=? WHERE faas_id=?`,
+        [newFaasNo, newFaasId]
+        );
+
+        // 4. Replace FAAS owners
+        await conn.query(`DELETE FROM faas_owners WHERE faas_id=?`, [newFaasId]);
+
+        if (Array.isArray(owner_ids)) {
+        for (const ownerId of owner_ids) {
+            const [[ownerInfo]] = await conn.query(
+            `SELECT * FROM owner_information WHERE owner_id=?`,
+            [ownerId]
+            );
+
+            await conn.query(
+            `INSERT INTO faas_owners
+            (faas_id, owner_id, last_name, first_name, middle_name,
+            suffix, tin_no, email, contact_no, address_house_no)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                newFaasId,
+                ownerId,
+                ownerInfo.last_name,
+                ownerInfo.first_name,
+                ownerInfo.middle_name,
+                ownerInfo.suffix,
+                ownerInfo.tin_no,
+                ownerInfo.email,
+                ownerInfo.contact_no,
+                ownerInfo.address_house_no
+            ]
+            );
+        }
+        }
+
+        // 5. Replace property owners
+        await conn.query(
+        `DELETE FROM property_owners WHERE property_id=?`,
+        [propertyId]
+        );
+
+        for (const ownerId of owner_ids || []) {
+        await conn.query(
+            `INSERT INTO property_owners (property_id, owner_id)
+            VALUES (?, ?)`,
+            [propertyId, ownerId]
+        );
+        }
+
+        // 6. LAND
         if (master_data.property_kind === 'Land') {
         await conn.query(
-            `INSERT INTO faasappraisal (faas_id, classification, subclassification, area, unit_value, base_market_value)
+            `INSERT INTO faasappraisal
+            (faas_id, classification, subclassification, area, unit_value, base_market_value)
             VALUES (?, ?, ?, ?, ?, ?)`,
-            [newFaasId, specific_data.pc_code, specific_data.psc_code, faas_core.area, faas_core.unit_value, calculations.base_market_value]
+            [
+            newFaasId,
+            specific_data.pc_code,
+            specific_data.psc_code,
+            faas_core.area,
+            faas_core.unit_value,
+            calculations.base_market_value
+            ]
         );
 
         await conn.query(
-            `INSERT INTO faasassessment (faas_id, actual_use, market_value, assessment_level)
+            `INSERT INTO faasassessment
+            (faas_id, actual_use, market_value, assessment_level)
             VALUES (?, ?, ?, ?)`,
-            [newFaasId, specific_data.au_code, calculations.final_market_value, calculations.assessment_level]
+            [
+            newFaasId,
+            specific_data.au_code,
+            calculations.final_market_value,
+            calculations.assessment_level
+            ]
         );
 
-        for (const adj of adjustments) {
+        for (const adj of adjustments || []) {
             await conn.query(
             `INSERT INTO faasadjustments (faas_id, factor, adjustment)
             VALUES (?, ?, ?)`,
@@ -2694,114 +3006,93 @@ router.post('/revision', async (req, res) => {
             );
         }
 
-        for (const imp of improvements) {
+        for (const imp of improvements || []) {
             await conn.query(
-            `INSERT INTO faasimprovements (faas_id, improvement_name, qty, unit_value)
+            `INSERT INTO faasimprovements
+            (faas_id, improvement_name, qty, unit_value)
             VALUES (?, ?, ?, ?)`,
             [newFaasId, imp.improvement_name, imp.quantity, imp.unit_value]
             );
         }
-        }
 
-        if (master_data.property_kind === 'Building') {
+        // Update propertyland
         await conn.query(
-            `INSERT INTO faasbldggeneral (faas_id, buildingKind, structuralType, buildingAge, storeys)
-            VALUES (?, ?, ?, ?, ?)`,
-            [newFaasId, specific_data.bk_id, specific_data.st_id, specific_data.year_constructed, specific_data.no_of_storeys]
-        );
-
-        for (const f of specific_data.floor_areas) {
-            await conn.query(
-            `INSERT INTO faasbldgfloorsarea (faas_id, floor_no, floor_area)
-            VALUES (?, ?, ?)`,
-            [newFaasId, f.floor_no, f.floor_area]
-            );
-        }
-
-        for (const m of specific_data.structural_materials) {
-            await conn.query(
-            `INSERT INTO faasbldgstruturalmaterials (faas_id, part, floor_no, material)
-            VALUES (?, ?, ?, ?)`,
-            [newFaasId, m.part, m.floor_no, m.material]
-            );
-        }
-
-        for (const a of specific_data.additional_items) {
-            await conn.query(
-            `INSERT INTO faasbldgadditionalitems (faas_id, item_name, quantity, unit_cost)
-            VALUES (?, ?, ?, ?)`,
-            [newFaasId, a.item_name, a.quantity, a.unit_cost]
-            );
-        }
-
-        await conn.query(
-            `INSERT INTO faasbldgappraisal (faas_id, unit_cost, base_market_value, deprication_rate, final_market_value)
-            VALUES (?, ?, ?, ?, ?)`,
-            [newFaasId, faas_core.unit_value, calculations.base_market_value, faas_core.depreciation_rate, calculations.final_market_value]
-        );
-
-        await conn.query(
-            `INSERT INTO faasbldgassessment (faas_id, actual_use, market_value, assessment_level, assessed_value, taxable)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-            [newFaasId, specific_data.bau_id, calculations.final_market_value, calculations.assessment_level, calculations.assessed_value, faas_core.taxable]
-        );
-        }
-
-        if (master_data.property_kind === 'Machinery') {
-        await conn.query(
-            `INSERT INTO faasmachineryappraisal
-            (faas_id, machinery_type, brand_model, capacity_hp, date_acquired, machinery_condition,
-            estimated_life, remaining_life, year_installed, initial_operation, original_cost,
-            conversion_factor, rcn, years_used, depreciation_rate, depreciation_value)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `UPDATE propertyland
+            SET au_code=?, psc_code=?, lot_area=?, remarks=?
+            WHERE property_id=?`,
             [
-            newFaasId,
-            specific_data.mt_id,
-            specific_data.brand_model,
-            specific_data.capacity_hp,
-            specific_data.date_acquired,
-            specific_data.condition,
-            specific_data.economic_life,
-            specific_data.remaining_life,
-            specific_data.year_installed,
-            specific_data.year_initial_operation,
-            specific_data.original_cost,
-            specific_data.conversion_factor,
-            specific_data.rcn,
-            specific_data.years_used,
-            specific_data.depreciation_rate,
-            specific_data.total_depreciation_value
+            specific_data.au_code,
+            specific_data.psc_code,
+            specific_data.lot_area,
+            specific_data.remarks,
+            propertyId
             ]
         );
 
-        await conn.query(
-            `INSERT INTO faasmachineryassessment
-            (faas_id, actual_use, market_value, assessment_level, assessed_value, taxable)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-            [newFaasId, specific_data.mau_id, calculations.final_market_value, calculations.assessment_level, calculations.assessed_value, faas_core.taxable]
+        // Replace landotherimprovements
+        const [[landRow]] = await conn.query(
+            `SELECT land_id FROM propertyland WHERE property_id=?`,
+            [propertyId]
         );
+
+        await conn.query(
+            `DELETE FROM landotherimprovements WHERE land_id=?`,
+            [landRow.land_id]
+        );
+
+        for (const imp of improvements || []) {
+            await conn.query(
+            `INSERT INTO landotherimprovements
+            (land_id, name, quantity)
+            VALUES (?, ?, ?)`,
+            [landRow.land_id, imp.improvement_name, imp.quantity]
+            );
+        }
         }
 
-        // 5. History
+        // 7. Update propertymasterlist
         await conn.query(
-        `INSERT INTO faas_transactionhistory
-        (property_id, transaction_type, changed_field, old_value, new_value, remarks, created_by)
-        VALUES (?, 'REVISION', 'FAAS', ?, ?, ?, ?)`,
+        `UPDATE propertymasterlist
+        SET arp_no=?, pin=?, lg_code=?, barangay=?,
+            lot_no=?, block_no=?, property_kind=?,
+            description=?, current_faas=?,
+            status='ACTIVE'
+        WHERE property_id=?`,
         [
-            oldFaas.property_id,
-            JSON.stringify({ faas_no: oldFaas.faas_no }),
-            JSON.stringify({ faas_no: newFaasNo }),
-            remarks,
-            oldFaas.created_by
+            master_data.arp_no,
+            master_data.pin,
+            master_data.lg_code,
+            master_data.barangay,
+            master_data.lot_no,
+            master_data.block_no,
+            master_data.property_kind,
+            master_data.description,
+            newFaasId,
+            propertyId
         ]
         );
 
+        // 8. Property History
+        const [historyRes] = await conn.query(
+        `INSERT INTO property_history
+        (property_id, action, remarks)
+        VALUES (?, 'REVISION', ?)`,
+        [propertyId, remarks]
+        );
+
+        await conn.query(
+        `INSERT INTO property_history_columns
+        (history_id, column_name, old_value, new_value)
+        VALUES (?, 'faas_no', ?, ?)`,
+        [historyRes.insertId, oldFaas.faas_no, newFaasNo]
+        );
+
         await conn.commit();
+
         res.json({
         message: 'FAAS revision successful',
-        faas_id: newFaasId,
-        faas_no: newFaasNo,
-        previous_faas_id: faas_id
+        new_faas_id: newFaasId,
+        new_faas_no: newFaasNo
         });
 
     } catch (err) {
@@ -2811,7 +3102,7 @@ router.post('/revision', async (req, res) => {
     } finally {
         conn.release();
     }
-});
+    });
 
 
 
@@ -2851,140 +3142,5 @@ router.get('/history/:property_id', async (req, res) => {
         conn.release();
     }
 });
-
-
-
-
-// router.get("/:faas_id", async (req, res) => {
-//     try {
-//         const { faas_id } = req.params;
-
-//         // ---------------------------------------
-//         // 1. Fetch Base FAAS
-//         // ---------------------------------------
-//         const [faasRows] = await pool.query(
-//             `SELECT * FROM FAAS WHERE faas_id = ?`,
-//             [faas_id]
-//         );
-
-//         if (faasRows.length === 0) {
-//             return res.status(404).json({ message: "FAAS not found." });
-//         }
-
-//         const faas = faasRows[0];
-//         const kind = faas.property_kind;
-//         console.log(faas);
-
-//         // ---------------------------------------
-//         // 2. Prepare response object
-//         // ---------------------------------------
-//         const response = {
-//             faas,
-//             land: null,
-//             building: null,
-//             machinery: null
-//         };
-
-//         // ---------------------------------------
-//         // 3. LAND
-//         // ---------------------------------------
-//         if (kind === "Land") {
-//             const [appraisal] = await pool.query(
-//                 `SELECT * FROM FAASAppraisal WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [improvements] = await pool.query(
-//                 `SELECT * FROM FAASImprovements WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [adjustments] = await pool.query(
-//                 `SELECT * FROM FAASAdjustments WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [assessment] = await pool.query(
-//                 `SELECT * FROM FAASAssessment WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-
-//             response.land = {
-//                 appraisal: appraisal[0] || null,
-//                 improvements,
-//                 adjustments,
-//                 assessment: assessment[0] || null
-//             };
-//         }
-
-//         // ---------------------------------------
-//         // 4. BUILDING
-//         // ---------------------------------------
-//         if (kind === "Building") {
-//             const [general] = await pool.query(
-//                 `SELECT * FROM FAASBldgGeneral WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [floors_area] = await pool.query(
-//                 `SELECT * FROM FAASBldgFloorsArea WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [structural] = await pool.query(
-//                 `SELECT * FROM FAASBldgStruturalMaterials WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [additional] = await pool.query(
-//                 `SELECT * FROM FAASBldgAdditionalItems WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [appraisal] = await pool.query(
-//                 `SELECT * FROM FAASBldgAppraisal WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [assessment] = await pool.query(
-//                 `SELECT * FROM FAASBldgAssessment WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-
-//             response.building = {
-//                 general: general[0] || null,
-//                 floors_area,
-//                 structural_materials: structural,
-//                 additional_items: additional,
-//                 appraisal: appraisal[0] || null,
-//                 assessment: assessment[0] || null
-//             };
-//         }
-
-//         // ---------------------------------------
-//         // 5. MACHINERY
-//         // ---------------------------------------
-//         if (kind === "Machinery") {
-//             const [appraisal] = await pool.query(
-//                 `SELECT * FROM FAASMachineryAppraisal WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-//             const [assessment] = await pool.query(
-//                 `SELECT * FROM FAASMachineryAssessment WHERE faas_id = ?`,
-//                 [faas_id]
-//             );
-
-//             response.machinery = {
-//                 appraisal: appraisal[0] || null,
-//                 assessment: assessment[0] || null
-//             };
-//         }
-
-//         // ---------------------------------------
-//         // 6. Return full result
-//         // ---------------------------------------
-//         // res.json(response);
-
-//     } catch (err) {
-//         console.error("Error fetching FAAS details:", err);
-//         res.status(500).json({ message: "Internal Server Error" });
-//     }
-// });
-
-
-
-
 
 export default router;

@@ -3,201 +3,228 @@ import pool from "../db.js";
 import { getActive } from "./global.js";
 const router = express.Router();
 
-router.post("/create", async (req, res) => {
+router.get("/list", async (req, res) => {
     try {
-        const {
-            faas_id,
-            td_no,
-            effectivity_date,
-            owner_name,
-            owner_address,
-            property_location,
-            property_kind,
-            market_value,
-            assessment_level,
-            assessed_value,
-            taxable,
-            created_by,
-        } = req.body;
-
-        if (!faas_id || !td_no)
-            return res.status(400).json({ error: "Missing required fields" });
-
-        //Check if FAAS exists
-        const [faasRows] = await pool.query(
-            `SELECT property_id FROM FAAS WHERE faas_id = ? LIMIT 1`,
-            [faas_id]
-        );
-        if (faasRows.length === 0)
-            return res.status(404).json({ error: "FAAS not found." });
-
-        const property_id = faasRows[0].property_id;
-
-        // Check if this FAAS already has a TD
-        const [existing] = await pool.query(
-            `SELECT td_id FROM TaxDeclaration WHERE faas_id = ? LIMIT 1`,
-            [faas_id]
-        );
-        if (existing.length > 0)
-            return res
-                .status(400)
-                .json({ error: "This FAAS already has an existing Tax Declaration." });
-
-        //Cancel all other active TDs for the same property
-        await pool.query(
-            `UPDATE TaxDeclaration 
-             SET status = 'CANCELLED' 
-             WHERE faas_id IN (
-                 SELECT faas_id FROM FAAS WHERE property_id = ?
-             ) AND status = 'ACTIVE'`,
-            [property_id]
-        );
-
-        //Create the new TD
-        const [result] = await pool.query(
-            `INSERT INTO TaxDeclaration 
-                (faas_id, td_no, effectivity_date, owner_name, owner_address, 
-                 property_location, property_kind, market_value, 
-                 assessment_level, assessed_value, taxable, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                faas_id,
-                td_no,
-                effectivity_date,
-                owner_name,
-                owner_address,
-                property_location,
-                property_kind,
-                market_value,
-                assessment_level,
-                assessed_value,
-                taxable,
-                created_by,
-            ]
-        );
-
-        res.json({
-            message: "Tax Declaration created successfully.",
-            td_id: result.insertId,
-        });
-    } catch (err) {
-        console.error("Error creating Tax Declaration:", err);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
-});
-
-router.get("/list/:faas_id", async (req, res) => {
-    const { faas_id } = req.params;
-
-    try {
-        const [rows] = await pool.query(`
-            SELECT 
-                td_id,
-                faas_id,
-                td_no,
-                effectivity_date,
-                owner_name,
-                owner_address,
-                property_location,
-                property_kind,
-                market_value,
-                assessment_level,
-                assessed_value,
-                taxable,
-                status,
-                created_by,
-                created_date
-            FROM TaxDeclaration
-            WHERE faas_id = ?
-            ORDER BY created_date DESC
-        `, [faas_id]);
-
-        res.status(200).json(rows);
-    } catch (err) {
-        console.error("Error fetching Tax Declarations:", err);
-        res.status(500).json({ error: "Internal Server Error" });
-    }
-});
-
-router.get("/aroll", async (req, res) => {
-    try {
-        const { barangay, lot_no, block_no, owner_name, property_kind, revision_year } = req.query;
-
-        //Base query
-        let query = `
-            SELECT 
-                r.year AS revision_year,
-                pm.barangay,
-                pm.lot_no,
-                pm.block_no,
-                td.td_no,
-                td.owner_name,
-                td.property_kind,
-                td.market_value,
-                td.assessed_value,
-                td.effectivity_date,
-                td.status
-            FROM TaxDeclaration td
-            JOIN FAAS f ON td.faas_id = f.faas_id
-            JOIN RevisionYear r ON f.ry_id = r.ry_id
-            JOIN PropertyMasterList pm ON f.property_id = pm.property_id
-            WHERE td.status = 'ACTIVE'
-        `;
-
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = (page - 1) * limit;
+        
+        const { property_kind, status, taxable, search_term } = req.query;
+        
+        let where = "WHERE 1=1";
         const params = [];
 
-        //Apply filters dynamically
-        if (barangay) {
-            query += ` AND pm.barangay = ?`;
-            params.push(`${barangay}`);
-        }
-        if (lot_no) {
-            query += ` AND pm.lot_no LIKE ?`;
-            params.push(`%${lot_no}%`);
-        }
-        if (block_no) {
-            query += ` AND pm.block_no LIKE ?`;
-            params.push(`%${block_no}%`);
-        }
-        if (owner_name) {
-            query += ` AND td.owner_name LIKE ?`;
-            params.push(`%${owner_name}%`);
-        }
         if (property_kind) {
-            query += ` AND td.property_kind = ?`;
+            where += " AND td.property_kind = ?";
             params.push(property_kind);
         }
-        if (revision_year) {
-            query += ` AND r.year = ?`;
-            params.push(revision_year);
+        if (status) {
+            where += " AND td.status = ?";
+            params.push(status);
+        }
+        if (taxable !== undefined && taxable !== '') {
+            where += " AND td.taxable = ?";
+            params.push(parseInt(taxable));
         }
 
-        //Sorting (optional)
-        query += ` ORDER BY pm.barangay, td.owner_name`;
+        if (search_term) {
+            where += ` AND (
+                td.td_no LIKE ? OR 
+                fa.faas_no LIKE ? OR 
+                pm.arp_no LIKE ? OR 
+                pm.pin LIKE ? OR 
+                td.admin_name LIKE ?
+            )`;
+            const likeTerm = `%${search_term}%`;
+            params.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
+        }
 
-        const [rows] = await pool.query(query, params);
+        // Count Query
+        const countSql = `
+            SELECT COUNT(*) AS total
+            FROM taxdeclaration td
+            LEFT JOIN faas fa ON fa.faas_id = td.faas_id
+            LEFT JOIN propertymasterlist pm ON pm.property_id = td.property_id
+            ${where}
+        `;
+        const [countRows] = await pool.query(countSql, params);
+        const total = countRows[0].total;
+        const totalPages = Math.ceil(total / limit);
 
-        res.json({ count: rows.length, data: rows });
+        // Data Query
+        const dataSql = `
+            SELECT 
+                td.td_id,
+                td.td_no,
+                td.property_kind,
+                td.status,
+                td.taxable,
+                td.total_market_value,
+                td.total_assessed_value,
+                td.admin_name,
+                td.barangay,
+                td.created_at,
+                fa.faas_no,
+                pm.arp_no,
+                pm.pin
+            FROM taxdeclaration td
+            LEFT JOIN faas fa ON fa.faas_id = td.faas_id
+            LEFT JOIN propertymasterlist pm ON pm.property_id = td.property_id
+            ${where}
+            ORDER BY td.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        const [rows] = await pool.query(dataSql, [...params, limit, offset]);
+
+        res.json({
+            data: rows,
+            pagination: {
+                total_records: total,
+                total_pages: totalPages,
+                current_page: page,
+                limit
+            }
+        });
+
     } catch (err) {
-        console.error("Error fetching Assessment Roll:", err);
+        console.error("TD list error:", err);
         res.status(500).json({ error: "Internal Server Error" });
     }
 });
 
-router.get('/count', async (req, res)=>{
-    try{
-        const sql = "SELECT COUNT(*) AS total FROM taxdeclaration WHERE status = 'ACTIVE'";
-        const [total] = await pool.query(sql, []);
-        res.json({success: true, message: "Returned Total Count", data: total[0]});
-    }catch(err){
-        console.error(err);
-        res.status(500).json({success: false, message: "Internal Server Error!"});
+router.post('/create', async (req, res) => {
+    const conn = await pool.getConnection();
+    try {
+        const data = req.body;
+
+        if (!data.faas_id || !data.property_id || !data.td_no) {
+            return res.status(400).json({ success: false, message: 'Missing required fields: faas_id, property_id, or td_no' });
+        }
+
+        await conn.beginTransaction();
+
+        // 1. Insert Main Tax Declaration Record
+        const [tdResult] = await conn.query(`
+            INSERT INTO taxdeclaration (
+                property_id, faas_id, td_no, property_identification_no,
+                admin_name, admin_tin, admin_address, admin_contact_no,
+                street, barangay, municipality, oct_no, survey_no, cct_no,
+                lot_no, block_no, title_date, boundary_north, boundary_south,
+                boundary_east, boundary_west, property_kind, total_market_value,
+                total_assessed_value, taxable, assessment_effectivity_qtr,
+                assessment_effectivity_year, memoranda, ordinance_no, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
+        `, [
+            data.property_id, data.faas_id, data.td_no, data.property_identification_no || null,
+            data.admin_name || null, data.admin_tin || null, data.admin_address || null, data.admin_contact_no || null,
+            data.street || null, data.barangay || null, data.municipality || null, data.oct_no || null, data.survey_no || null, data.cct_no || null,
+            data.lot_no || null, data.block_no || null, data.title_date || null, data.boundary_north || null, data.boundary_south || null,
+            data.boundary_east || null, data.boundary_west || null, data.property_kind, data.total_market_value || 0,
+            data.total_assessed_value || 0, data.taxable ? 1 : 0, data.assessment_effectivity_qtr,
+            data.assessment_effectivity_year, data.memoranda || null, data.ordinance_no || null
+        ]);
+        
+        const td_id = tdResult.insertId;
+
+        // 2. Transfer Owners from FAAS to Tax Declaration
+        // This copies the owner snapshot exactly as it was during the FAAS creation
+        await conn.query(`
+            INSERT INTO taxdeclaration_owners (
+                td_id, owner_id, last_name, first_name, middle_name, suffix, tin_no, email, address_house_no
+            )
+            SELECT 
+                ?, owner_id, last_name, first_name, middle_name, suffix, tin_no, email, address_house_no
+            FROM faas_owners 
+            WHERE faas_id = ?
+        `, [td_id, data.faas_id]);
+
+        // 3. Transfer Assessment Summary
+        // Adjust the SELECT fields based on your exact faasassessment and faasappraisal table structures
+        if (data.property_kind === 'Land') {
+            await conn.query(`
+                INSERT INTO taxdeclaration_assessment (
+                    td_id, classification, area, market_value, actual_use, assessment_level, assessed_value
+                )
+                SELECT 
+                    ?, app.classification, app.area, ass.market_value, ass.actual_use, ass.assessment_level, ass.assessed_value
+                FROM faasassessment ass
+                LEFT JOIN faasappraisal app ON app.faas_id = ass.faas_id
+                WHERE ass.faas_id = ?
+            `, [td_id, data.faas_id]);
+        } else {
+            // For Building and Machinery (Area and Classification might not apply the same way, falling back to core assessment)
+            await conn.query(`
+                INSERT INTO taxdeclaration_assessment (
+                    td_id, market_value, actual_use, assessment_level, assessed_value
+                )
+                SELECT 
+                    ?, market_value, actual_use, assessment_level, assessed_value
+                FROM faasassessment
+                WHERE faas_id = ?
+            `, [td_id, data.faas_id]);
+        }
+
+        await conn.commit();
+        res.json({ success: true, td_id, message: 'Tax Declaration created successfully!' });
+
+    } catch (error) {
+        await conn.rollback();
+        console.error("TD Creation Error:", error);
+        res.status(500).json({ success: false, message: 'Failed to create Tax Declaration.', error: error.message });
+    } finally {
+        conn.release();
     }
 });
 
+router.get("/:id", async (req, res) => {
+    try {
+        const tdId = parseInt(req.params.id);
 
-//filters
+        if (!tdId || isNaN(tdId)) {
+            return res.status(400).json({ success: false, message: "Invalid Tax Declaration ID." });
+        }
 
+        // 1. Fetch Main Tax Declaration Data
+        const [tdRows] = await pool.query(
+            `SELECT * FROM taxdeclaration WHERE td_id = ?`, 
+            [tdId]
+        );
+
+        if (tdRows.length === 0) {
+            return res.status(404).json({ success: false, message: "Tax Declaration not found." });
+        }
+
+        const td = tdRows[0];
+
+        // 2. Concurrently fetch related Owners and Assessments for speed
+        const [
+            [ownersRows],
+            [assessmentRows]
+        ] = await Promise.all([
+            pool.query(
+                `SELECT * FROM taxdeclaration_owners WHERE td_id = ?`, 
+                [tdId]
+            ),
+            pool.query(
+                `SELECT * FROM taxdeclaration_assessment WHERE td_id = ?`, 
+                [tdId]
+            )
+        ]);
+
+        // 3. Construct and send the response
+        res.json({
+            success: true,
+            td: td,
+            owners: ownersRows,
+            assessment: assessmentRows
+        });
+
+    } catch (err) {
+        console.error("TD fetch error:", err);
+        res.status(500).json({ success: false, message: "Internal Server Error", error: err.message });
+    }
+});
 
 
 export default router;

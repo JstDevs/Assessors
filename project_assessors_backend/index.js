@@ -12,6 +12,7 @@ import tcRoutes from "./routes/tc.js";
 import olRoutes from "./routes/owner.js"
 import baiRoutes from "./routes/bai.js"
 import loiRoutes from "./routes/loi.js"
+import userRoutes from "./routes/users.js"
 import cors from "cors";
 
 dotenv.config();
@@ -32,6 +33,7 @@ app.use("/tc", tcRoutes);
 app.use("/ol", olRoutes);
 app.use("/bai", baiRoutes);
 app.use("/loi", loiRoutes);
+app.use('/user', userRoutes);
 
 app.listen(process.env.PORT, "0.0.0.0", () => {
   console.log(`Server running on http://0.0.0.0:${process.env.PORT}`);

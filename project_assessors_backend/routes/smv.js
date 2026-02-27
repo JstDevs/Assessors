@@ -721,7 +721,6 @@ router.delete('/delete', async (req, res) => {
     }
 });
 
-
 router.get('/landSMV', async (req, res)=>{
     try{
         const { psc_id, lg_id, ry_id } = req.query;
@@ -754,6 +753,8 @@ router.get('/buildingSMV', async (req, res)=>{
                         AND st_id = ?
                         AND ry_id = ?`;
         const [data] = await pool.query(sql, [bk_id, st_id, ry_id]);
+        console.log("INPUTS:", bk_id, st_id, ry_id);
+        console.log("SMV_BUILDING:", data.length);
         res.json({success: true, message:"Success!", data: data[0]});
     }catch(err){
         console.error(err);
