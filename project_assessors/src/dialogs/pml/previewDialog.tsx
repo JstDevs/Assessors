@@ -351,8 +351,8 @@ export const PropertyPreviewDialog = ({ showDialog, setShowDialog, propertyId, h
             case 'Revision':
                 setShowRevisionDialog(true);
                 break;
-            case 'Improvement':
-                setShowImprovementDialog(true);
+            // case 'Improvement': //removing improvement
+            //     setShowImprovementDialog(true);
                 break;
             case 'Destroyed':
                 setShowDestroyDialog(true);
@@ -512,7 +512,7 @@ export const PropertyPreviewDialog = ({ showDialog, setShowDialog, propertyId, h
                                 {/* Menu Items Container */}
                                 <div className='py-1' role="none">
                                     {/* Replaced your divs with a simple mapping for cleaner code */}
-                                    {['Original', 'Transfer', 'Subdivision', 'Consolidation', 'Reclassification', 'Revision', 'Improvement', 'Destroyed', 'Cancellation'].map((item) => (
+                                    {['Original', 'Transfer', 'Subdivision', 'Consolidation', 'Reclassification', 'Revision', 'Destroyed', 'Cancellation'].map((item) => (
                                         <div
                                             key={item}
                                             onClick={() => { 
@@ -533,7 +533,7 @@ export const PropertyPreviewDialog = ({ showDialog, setShowDialog, propertyId, h
                                                 transition duration-150 ease-in-out
                                                 ${
                                                     hasOriginal?
-                                                        (item !== 'Original' && !(propertyData.property_kind === 'Machinery' && item === 'Reclassification') && !(propertyData.property_kind === 'Land' && item === 'Destroyed') && !(propertyData.property_kind !== 'Land' && (item === 'Improvement' || item === 'Consolidation' || item === 'Subdivision' ))? 'cursor-pointer text-black ': 'cursor-not-allowed text-gray-400 '):
+                                                        (item !== 'Original' && !(propertyData.property_kind === 'Machinery' && item === 'Reclassification') && !(propertyData.property_kind === 'Land' && item === 'Destroyed') && !(propertyData.property_kind !== 'Land' && (item === 'Consolidation' || item === 'Subdivision' ))? 'cursor-pointer text-black ': 'cursor-not-allowed text-gray-400 '):
                                                         (item === 'Original'? 'cursor-pointer text-black ': 'cursor-not-allowed text-gray-400 ')
                                                 }   
                                             `}

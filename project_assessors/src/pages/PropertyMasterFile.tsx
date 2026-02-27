@@ -136,7 +136,7 @@ const PropertyMasterFile: React.FC = () => {
         try {
             const res = await api.get('pml/list');
             setProperties(res.data.data);
-            console.log(res.data.data);
+            // console.log(res.data.data);
         } catch (err) {
             setError('Error fetching Property Master List!');
             console.error(err);

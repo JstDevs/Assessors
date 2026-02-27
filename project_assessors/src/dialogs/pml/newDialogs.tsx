@@ -678,7 +678,7 @@ export const PropertyCreationDialog: React.FC<PropertyCreationDialogProps> = ({ 
 
     const handleSpecificChange = (setter: React.Dispatch<React.SetStateAction<any>>) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, value?: string | number) => {
         const { name } = e.target;
-        console.log(name, e.target.value)
+        // console.log(name, e.target.value)
         const finalValue = value !== undefined ? value : e.target.value;
         if (masterData.property_kind === 'Land' && name === 'pc_code') {
             setSelectedPCCode(finalValue as string);

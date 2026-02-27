@@ -9,96 +9,132 @@ import {
     AlertTriangle, 
     Search, 
     MapPin, 
-    User, 
-    FileText, 
-    ChevronDown, 
-    PieChart,
-    Users
+    FileText,
+    ChevronDown,
+    Check
 } from 'lucide-react';
 import api from '../../../axiosBase';
 
-// --- MOCK API (Self-contained) ---
-// const api = {
-//     get: async (url: string, config?: any) => {
-//         await new Promise(r => setTimeout(r, 400));
-        
-//         // 1. Fetch Property List for Search
-//         if (url === 'faas/list') {
-//             return {
-//                 data: [
-//                     { faas_id: 101, faas_no: '2023-09-001-12345', owner_name: 'Maria Clara', property_kind: 'Land' },
-//                     { faas_id: 102, faas_no: '2023-09-001-67890', owner_name: 'Jose Rizal', property_kind: 'Land' },
-//                     { faas_id: 103, faas_no: '2023-09-001-11223', owner_name: 'Andres Bonifacio', property_kind: 'Land' },
-//                     { faas_id: 201, faas_no: '2023-10-BLDG-001', owner_name: 'Maria Clara', property_kind: 'Building' } // Should be filtered out
-//                 ]
-//             };
-//         }
+// --- REUSABLE COMPONENTS ---
 
-//         // 2. Fetch Specific Property Owners (NEW ROUTE)
-//         if (url.includes('faas/') && url.includes('/owners')) {
-//             // Mock owners based on ID in URL
-//             return {
-//                 data: [
-//                     { owner_id: 99, first_name: 'Maria', last_name: 'Clara', middle_name: 'D', address_house_no: 'Makati City' },
-//                     // Add a second owner to demonstrate the list view
-//                     { owner_id: 100, first_name: 'Crisostomo', last_name: 'Ibarra', middle_name: 'Q', address_house_no: 'San Diego' },
-//                     { owner_id: 101, first_name: 'Elias', last_name: 'Bernardo', middle_name: 'S', address_house_no: 'Laguna' }
-//                 ]
-//             };
-//         }
+interface SelectOption {
+    label: string;
+    value: string | number;
+}
 
-//         // 3. Fetch Specific FAAS Details
-//         if (url.includes('faas/')) {
-//             const id = url.split('/')[1];
-//             // Mock varied data based on ID
-//             const areaMap: Record<string, string> = { '101': '1000', '102': '500', '103': '300' };
-            
-//             return {
-//                 data: {
-//                     faas: {
-//                         faas_id: parseInt(id),
-//                         faas_no: `2023-09-001-${id}000`,
-//                         owner_name: id === '101' ? 'Maria Clara' : id === '102' ? 'Jose Rizal' : 'Andres Bonifacio',
-//                         owner_address: 'Manila, Philippines',
-//                         property_kind: 'Land',
-//                         status: 'ACTIVE',
-//                         barangay: 'Poblacion'
-//                     },
-//                     land: {
-//                         appraisal: {
-//                             area: areaMap[id] || '200',
-//                             unit_value: '5000',
-//                             classification: 'Residential',
-//                             subclassification: 'R-1'
-//                         },
-//                         improvements: [
-//                             { improvement_id: 1, improvement_name: 'Fence', qty: 10, unit_value: '1000' }
-//                         ]
-//                     }
-//                 }
-//             };
-//         }
+interface SearchableSelectProps {
+    options: SelectOption[];
+    value: string | number | undefined;
+    onChange: (val: any) => void;
+    placeholder?: string;
+    isLoading?: boolean;
+    disabled?: boolean;
+    className?: string;
+}
 
-//         // 4. Fetch Owners List (General)
-//         if (url === 'ol/') {
-//             return {
-//                 data: [
-//                     { owner_id: 10, first_name: 'Robert', last_name: 'Conchas', middle_name: 'C', address_house_no: 'Tondo, Manila' },
-//                     { owner_id: 11, first_name: 'Juan', last_name: 'Test', middle_name: 'A', address_house_no: 'Quezon City' },
-//                     { owner_id: 12, first_name: 'Maria', last_name: 'Clara', middle_name: 'D', address_house_no: 'Makati City' },
-//                     { owner_id: 13, first_name: 'Jose', last_name: 'Rizal', middle_name: 'P', address_house_no: 'Calamba, Laguna' },
-//                 ]
-//             };
-//         }
+const SearchableSelect: React.FC<SearchableSelectProps> = ({
+    options,
+    value,
+    onChange,
+    placeholder = "Select...",
+    isLoading = false,
+    disabled = false,
+    className = ""
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const wrapperRef = useRef<HTMLDivElement>(null);
 
-//         return { data: null };
-//     },
-//     post: async (url: string, payload: any) => {
-//         await new Promise(r => setTimeout(r, 1200));
-//         console.log("POST Payload:", payload);
-//         return { data: { success: true } };
-//     }
-// };
+    const selectedOption = options.find(o => o.value === value);
+    
+    const filtered = options.filter(o => 
+        o.label.toLowerCase().includes(search.toLowerCase())
+    );
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    useEffect(() => {
+        if (isOpen) setSearch("");
+    }, [isOpen]);
+
+    return (
+        <div className={`relative ${className}`} ref={wrapperRef}>
+            <div
+                onClick={() => !disabled && setIsOpen(!isOpen)}
+                className={`
+                    w-full border rounded-lg p-2 text-sm flex items-center justify-between cursor-pointer bg-white transition-all
+                    ${isOpen ? 'ring-2 ring-blue-100 border-blue-400' : 'border-gray-300 hover:border-gray-400'}
+                    ${disabled ? 'opacity-60 cursor-not-allowed bg-gray-50' : ''}
+                `}
+            >
+                <span className={`truncate ${!selectedOption ? "text-gray-400" : "text-gray-800"}`}>
+                    {selectedOption ? selectedOption.label : placeholder}
+                </span>
+                {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-gray-400 flex-shrink-0" />
+                ) : (
+                    <ChevronDown className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                )}
+            </div>
+
+            {isOpen && !disabled && (
+                <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                    <div className="p-2 border-b border-gray-100 bg-gray-50">
+                        <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-gray-400" />
+                            <input 
+                                autoFocus
+                                type="text" 
+                                className="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:border-blue-400"
+                                placeholder="Search..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="overflow-y-auto flex-1">
+                        {isLoading ? (
+                            <div className="p-4 text-center text-xs text-gray-400 flex items-center justify-center gap-2">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+                            </div>
+                        ) : filtered.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-gray-400">
+                                No results found.
+                            </div>
+                        ) : (
+                            filtered.map(opt => (
+                                <div 
+                                    key={opt.value}
+                                    onClick={() => {
+                                        onChange(opt.value);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`
+                                        px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 flex items-center justify-between
+                                        ${opt.value === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}
+                                    `}
+                                >
+                                    <span className="truncate">{opt.label}</span>
+                                    {opt.value === value && <Check className="w-3.5 h-3.5 flex-shrink-0" />}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 
 // --- INTERFACES ---
 
@@ -346,30 +382,37 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
     const [newPin, setNewPin] = useState('');
     const [newLotNo, setNewLotNo] = useState('');
     const [newBlockNo, setNewBlockNo] = useState('');
+    
+    // Location Details State
+    const [newLgCode, setNewLgCode] = useState('');
     const [newBarangay, setNewBarangay] = useState('');
-    const [newOwners, setNewOwners] = useState<OwnerOption[]>([]); // Multiple Owners Support
     const [newAddress, setNewAddress] = useState('');
+    const [newOwners, setNewOwners] = useState<OwnerOption[]>([]);
 
     // Dropdown/Search State
     const [availableProperties, setAvailableProperties] = useState<PropertyDetails[]>([]);
     const [availableOwners, setAvailableOwners] = useState<OwnerOption[]>([]); 
+    const [lguOptions, setLguOptions] = useState<SelectOption[]>([]);
+    const [barangayOptions, setBarangayOptions] = useState<SelectOption[]>([]);
+    
     const [selectedDropdownId, setSelectedDropdownId] = useState<string>('');
     const [propertySearchTerm, setPropertySearchTerm] = useState('');
+    
+    // Loading States
     const [loadingCandidates, setLoadingCandidates] = useState(false);
-
-    // Search/Fetch State
+    const [barangaysLoading, setBarangaysLoading] = useState(false);
     const [isSearching, setIsSearching] = useState(false);
     const [searchError, setSearchError] = useState<string | null>(null);
-
-    // Submission State
     const [submitLoading, setSubmitLoading] = useState(false);
+    
+    // Result states
     const [success, setSuccess] = useState(false);
     const [submitError, setSubmitError] = useState<string | null>(null);
 
-    // --- INITIAL LOAD ---
+    // --- INITIAL LOAD (References) ---
     useEffect(() => {
-        if (showDialog && faasId) {
-            // Reset Form
+        if (showDialog) {
+            // Reset Form on open
             setSelectedProperties([]);
             setSuccess(false);
             setSubmitError(null);
@@ -377,21 +420,23 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
             setSelectedDropdownId('');
             setPropertySearchTerm('');
             setNewOwners([]);
-            
-            // Reset New Property Fields
             setNewArp('');
             setNewPin('');
             setNewLotNo('');
             setNewBlockNo('');
+            setNewLgCode('');
             setNewBarangay('');
             setNewAddress('');
             
-            // Load the primary property
-            loadPropertyById(faasId, true);
-            
-            // Fetch reference data
+            // Load base lists
             fetchAvailableProperties();
             fetchOwners();
+            fetchLgus();
+
+            // Load the primary property
+            if (faasId) {
+                loadPropertyById(faasId, true);
+            }
         }
     }, [showDialog, faasId]);
 
@@ -401,13 +446,52 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
     // Auto-fill defaults from primary property
     useEffect(() => {
         if (primaryProperty) {
+            const pLgCode = primaryProperty.lg_code || '';
             const pBarangay = primaryProperty.barangay || '';
             const pOwnerAddr = primaryProperty.owner_address || '';
 
             if (!newAddress) setNewAddress(pOwnerAddr);
+            if (!newLgCode && pLgCode) setNewLgCode(pLgCode);
+            // newBarangay will be set safely after options resolve
             if (!newBarangay && pBarangay) setNewBarangay(pBarangay);
         }
     }, [primaryProperty]); 
+
+    // --- FETCH BARANGAYS DEPENDENT ON LGU ---
+    useEffect(() => {
+        const fetchBarangays = async () => {
+            if (!newLgCode) {
+                setBarangayOptions([]);
+                return;
+            }
+            setBarangaysLoading(true);
+            try {
+                // 1. Get LG ID from LG Code
+                const lgIdRes = await api.get('lvg/getID', { params: { code: newLgCode } });
+                const lgId = lgIdRes.data.lg_id || lgIdRes.data.data?.lg_id;
+                
+                if (lgId) {
+                    // 2. Fetch Barangays with LG ID
+                    const brgyRes = await api.get('lvg/barangayList', { params: { lg_id: lgId } });
+                    const list = brgyRes.data.data || brgyRes.data || [];
+                    
+                    const options = list.map((item: any) => ({
+                        label: item.barangay_name || item.name || item,
+                        value: item.barangay_name || item.name || item
+                    }));
+                    setBarangayOptions(options);
+                } else {
+                    setBarangayOptions([]);
+                }
+            } catch (error) {
+                console.error("Error fetching barangays:", error);
+                setBarangayOptions([]);
+            } finally {
+                setBarangaysLoading(false);
+            }
+        };
+        fetchBarangays();
+    }, [newLgCode]);
 
     const totalArea = useMemo(() => {
         return selectedProperties.reduce((sum, p) => sum + parseFloat(p.land?.appraisal.area || '0'), 0);
@@ -423,9 +507,21 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
         return allImps;
     }, [selectedProperties]);
 
-    // Removed uniqueOwners and isOwnerMismatch logic since warning is not needed
 
-    // --- FETCH FUNCTIONS ---
+    // --- API CALLS ---
+    const fetchLgus = async () => {
+        try {
+            const res = await api.get('lvg/list');
+            const list = res.data.data || res.data || [];
+            setLguOptions(list.map((lg: any) => ({
+                label: `${lg.code} - ${lg.name || lg.lg_name || ''}`,
+                value: lg.code
+            })));
+        } catch (err) {
+            console.error("Failed to load LGU list", err);
+        }
+    };
+
     const fetchAvailableProperties = async () => {
         setLoadingCandidates(true);
         try {
@@ -455,7 +551,7 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
         try {
             // Fetch Property Details
             const res = await api.get(`faas/${id}`);
-            // Fetch Property Owners (Associated with this property)
+            // Fetch Property Owners
             const ownersRes = await api.get(`faas/${id}/owners`);
 
             const data = res.data;
@@ -522,14 +618,17 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
                 new_pin: newPin,
                 new_lot_no: newLotNo,
                 new_block_no: newBlockNo,
+                new_lg_code: newLgCode,
                 new_barangay: newBarangay,
-                owner_ids: newOwners.map(o => o.owner_id), // Send Array of IDs
+                owner_ids: newOwners.map(o => o.owner_id),
                 owner_address: newAddress,
                 // Inherit classification from primary for defaults
                 new_unit_value: primaryProperty?.land?.appraisal.unit_value,
                 new_classification: primaryProperty?.land?.appraisal.classification,
                 new_subclassification: primaryProperty?.land?.appraisal.subclassification
             };
+
+            console.log(payload);
 
             await api.post('faas/consolidation', payload);
             setSuccess(true);
@@ -610,7 +709,6 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
                         <div className="flex-1 space-y-2">
                             <div className="flex justify-between items-center">
                                 <h3 className="text-sm font-bold text-gray-700">Selected ({selectedProperties.length})</h3>
-                                {/* Warning Removed */}
                             </div>
                             
                             <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50 max-h-[400px] overflow-y-auto">
@@ -699,7 +797,7 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
                                 <div className="grid grid-cols-2 gap-4">
                                     
                                     {/* Multi-Owner Selection */}
-                                    <div className="col-span-2 md:col-span-1">
+                                    <div className="col-span-2">
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">Registered Owner(s)</label>
                                         <MultiOwnerSelector 
                                             selectedOwners={newOwners}
@@ -708,16 +806,34 @@ export const FAASConsolidationDialog: React.FC<FAASConsolidationDialogProps> = (
                                         />
                                     </div>
 
-                                    <div className="col-span-2 md:col-span-1">
+                                    <div className="col-span-2">
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">Owner Address</label>
                                         <input type="text" value={newAddress} onChange={e => setNewAddress(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Address" />
                                     </div>
-                                    <div className="col-span-2">
+
+                                    {/* LGU & Barangay Pickers */}
+                                    <div className="col-span-2 md:col-span-1">
+                                        <label className="block text-xs font-semibold text-gray-600 mb-1">LGU Code</label>
+                                        <SearchableSelect 
+                                            options={lguOptions}
+                                            value={newLgCode}
+                                            onChange={(val) => {
+                                                setNewLgCode(val);
+                                                setNewBarangay(''); // Reset barangay when LGU changes
+                                            }}
+                                            placeholder="Select LGU"
+                                        />
+                                    </div>
+                                    <div className="col-span-2 md:col-span-1">
                                         <label className="block text-xs font-semibold text-gray-600 mb-1">Barangay</label>
-                                        <div className="relative">
-                                            <MapPin className="w-4 h-4 text-gray-400 absolute top-2.5 left-2.5" />
-                                            <input type="text" value={newBarangay} onChange={e => setNewBarangay(e.target.value)} className="w-full border border-gray-300 rounded-lg pl-9 p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Barangay" />
-                                        </div>
+                                        <SearchableSelect 
+                                            options={barangayOptions}
+                                            value={newBarangay}
+                                            onChange={setNewBarangay}
+                                            placeholder={barangaysLoading ? "Loading..." : "Select Barangay"}
+                                            isLoading={barangaysLoading}
+                                            disabled={!newLgCode || barangaysLoading}
+                                        />
                                     </div>
                                 </div>
 

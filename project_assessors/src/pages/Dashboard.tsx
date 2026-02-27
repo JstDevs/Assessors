@@ -23,43 +23,49 @@ function Dashboard() {
         {
             title: "Property Management",
             items: [
-                {
-                    name: "Owner Information List",
-                    description: "Manage all of the available users in the system.",
-                    icon: <Users size={24} />,
-                    path: "../ol",
-                    color: "bg-amber-500"
-                },
-                {
-                    name: "Property Master List",
-                    description: "Central record of all taxable real properties, including land, buildings, and machinery.",
-                    icon: <FolderOpen size={24} />,
-                    path: "../pml",
-                    color: "bg-emerald-500"
-                },
-                {
-                    name: "FAAS List",
-                    description: "Manage the Field Appraisal and Assessment Sheets (FAAS) for property classifications and updates.",
-                    icon: <FileText size={24} />,
-                    path: "../faas",
-                    color: "bg-indigo-500"
-                },
-                // {
-                //     name: "Record of Assessment (ROA)",
-                //     description: "Detailed listing of individual property assessments, forming the basis for the Assessment Roll.",
-                //     icon: <Book size={24} />,
-                //     path: "../roa",
-                //     color: "bg-rose-500"
-                // },
-                // {
-                //     name: "Assessment Roll",
-                //     description: "Summarized list of all assessed properties in the locality for the current assessment year.",
-                //     icon: <ClipboardList size={24} />,
-                //     path: "../ar",
-                //     color: "bg-blue-500"
-                // }
-
-            ]
+                    {
+                        name: "Owner Information List",
+                        description: "Centralized database of property owners, administrators, and their associated contact information.",
+                        icon: <Users size={24} />,
+                        path: "../ol",
+                        color: "bg-amber-500"
+                    },
+                    {
+                        name: "Property Master List",
+                        description: "Comprehensive inventory of all real property units (RPUs), including land, buildings, and machinery.",
+                        icon: <FolderOpen size={24} />,
+                        path: "../pml",
+                        color: "bg-emerald-500"
+                    },
+                    {
+                        name: "FAAS List",
+                        description: "Manage Field Appraisal and Assessment Sheets used for property valuation, classification, and physical indexing.",
+                        icon: <FileText size={24} />,
+                        path: "../faas",
+                        color: "bg-indigo-500"
+                    },
+                    {
+                        name: "Tax Declaration",
+                        description: "Process official Tax Declarations detailing the assessed value and taxability of specific properties.",
+                        icon: <Scroll size={24} />,
+                        path: "../td",
+                        color: "bg-rose-500"
+                    },
+                    {
+                        name: "Assessment Roll",
+                        description: "Master list of all appraised and assessed properties prepared for taxation purposes in a specific revision year.",
+                        icon: <ClipboardList size={24} />,
+                        path: "../ar",
+                        color: "bg-blue-500"
+                    },
+                    {
+                        name: "Record Of Assessment",
+                        description: "Complete registry of all active tax declarations, tracking property ownership, administrators, and assessment values.",
+                        icon: <ClipboardList size={24} />,
+                        path: "../roa", // Note: You might want to change this from "../ar" to "../roa"
+                        color: "bg-teal-500" // Note: Changed color to distinguish from Assessment Roll
+                    }
+                ]
         },
         // {
         //     title: "Valuation & Assessment",

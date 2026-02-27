@@ -1,6 +1,28 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { Landmark, Save, X, Loader2, ClipboardList, LandPlot, Building as BuildingIcon, Factory, Trash2, Layers, HardHat, Hammer, CheckCircle, History, Calculator, FileText, Plus } from 'lucide-react';
-import api from '../../../axiosBase.ts';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { 
+    Landmark, 
+    Save, 
+    X, 
+    Loader2, 
+    ClipboardList, 
+    LandPlot, 
+    Building as BuildingIcon, 
+    Factory, 
+    Trash2, 
+    History, 
+    Calculator, 
+    Plus, 
+    UserPlus, 
+    Users, 
+    AlertCircle, 
+    Search, 
+    ChevronDown, 
+    Check 
+} from 'lucide-react';
+
+// Commented out to prevent compilation errors in this preview environment.
+import api from '../../../axiosBase';
+// const api: any = { get: async () => ({ data: { data: [] } }), post: async () => ({ data: {} }), put: async () => ({ data: {} }) };
 
 type PropertyKind = 'Land' | 'Building' | 'Machinery';
 type PropertyStatus = 'ACTIVE' | 'INACTIVE' | 'TRANSFERRED' | 'CANCELLED';
@@ -8,9 +30,35 @@ type MachineryCondition = 'NEW' | 'SECOND_HAND';
 
 // --- Interfaces ---
 
+interface OwnerOption {
+    owner_id: number;
+    first_name: string;
+    last_name: string;
+    middle_name?: string;
+    address_house_no?: string;
+    contact_no?: string;
+    tin_no?: string;
+}
+
+interface LandImprovementOption {
+    value_id: number;
+    item_id: number;
+    improvement_name: string;
+    unit_value: number;
+}
+
+interface BuildingItemOption {
+    value_id: number;
+    item_id: number;
+    item_name: string;
+    unit_value: number;
+}
+
 interface LandImprovement {
     id: number;
     improvement_name: string;
+    item_id?: number;
+    value_id?: number;
     quantity: number;
     unit_value: number;
     base_market_value: number;
@@ -38,7 +86,8 @@ interface BuildingStructuralMaterial {
 
 interface BuildingAdditionalItem {
     id: number;
-    item_name: string;
+    item_id?: number;
+    item_name?: string;
     quantity: number | '';
     unit_cost: number | '';
     total_cost: number;
@@ -47,8 +96,6 @@ interface BuildingAdditionalItem {
 interface MasterData {
     arp_no: string;
     pin: string;
-    owner_name: string;
-    owner_address: string;
     lg_code: string;
     barangay: string;
     lot_no: string;
@@ -114,8 +161,6 @@ const CONDITION_ENUM_MACHINERY: MachineryCondition[] = ['NEW', 'SECOND_HAND'];
 const initialMasterData: MasterData = {
     arp_no: '',
     pin: '',
-    owner_name: '',
-    owner_address: '',
     lg_code: '',
     barangay: '',
     lot_no: '',
@@ -182,183 +227,13 @@ const extractCode = (str: string | undefined | null) => {
     return match ? match[1] : str; 
 };
 
-// --- Components ---
-
-const InputField: React.FC<any> = ({ label, name, value, onChange, type = 'text', required = false, isFullWidth = false, readOnly = false, min = undefined, step = undefined, placeholder = '' }) => (
-    <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
-        <label className="block text-xs font-medium text-gray-700 mb-1">
-            {label} {required && <span className="text-red-500">*</span>}
-        </label>
-        <input
-            type={type}
-            name={name}
-            value={value === undefined || value === null ? '' : value}
-            onChange={(e) => {
-                const val = type === 'number' ? parseNumericValue(e.target.value) : e.target.value;
-                onChange(e, val);
-            }}
-            required={required}
-            readOnly={readOnly}
-            min={min}
-            step={step}
-            placeholder={placeholder}
-            className={`mt-1 block w-full rounded-md shadow-sm border-gray-300 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm p-2 transition
-            ${readOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed focus:ring-0' : 'bg-white'}`}
-        />
-    </div>
-);
-
-const SelectField: React.FC<any> = ({ label, name, value, values, onChange, options, required = false, readOnly = false, isFullWidth = false }) => (
-    <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
-        <label className="block text-xs font-medium text-gray-700 mb-1">
-            {label} {required && <span className="text-red-500">*</span>}
-        </label>
-        <select
-            name={name}
-            value={value}
-            onChange={onChange}
-            required={required}
-            disabled={readOnly || options.length === 0}
-            className={`mt-1 block w-full rounded-md shadow-sm border-gray-300 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm p-2 transition
-            ${readOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'} ${options.length === 0 ? 'opacity-70' : ''}`}
-        >
-            {options.length === 0 && <option value="" disabled>{`Loading ${label.replace('*', '').trim()}...`}</option>}
-            <option value="" disabled>{`Select ${label.replace('*', '').trim()}`}</option>
-            {options.map((opt: string, index: number) => {
-                const optValue = values ? values[index] : opt;
-                return (
-                    <option key={optValue} value={optValue}>{opt}</option>
-                );
-            })}
-        </select>
-    </div>
-);
-
-const TextAreaField: React.FC<any> = ({ label, name, value, onChange, required = false, readOnly = false, isFullWidth = false }) => (
-    <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
-        <label className="block text-xs font-medium text-gray-700 mb-1">
-            {label} {required && <span className="text-red-500">*</span>}
-        </label>
-        <textarea
-            name={name}
-            value={value}
-            onChange={onChange}
-            required={required}
-            rows={2}
-            readOnly={readOnly}
-            className={`mt-1 block w-full rounded-md shadow-sm border-gray-300 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm p-2 transition
-            ${readOnly ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'}`}
-        />
-    </div>
-);
-
-const BuildingFloorAreaInput: React.FC<{ floor: BuildingFloorArea; onChange: (floorNo: number, value: number) => void; }> = ({ floor, onChange }) => (
-    <InputField
-        key={`floor-${floor.floor_no}`}
-        label={`Floor Area - Floor ${floor.floor_no}`}
-        name={`floor_area_${floor.floor_no}`}
-        value={floor.floor_area}
-        onChange={(_e: any, val: number) => onChange(floor.floor_no, val)}
-        type="number"
-        min="0.01"
-        step="0.01"
-        required
-    />
-);
-
-const BuildingStructuralMaterialForm: React.FC<{ bsm: BuildingStructuralMaterial, floorCount: number, onChange: (id: number, name: keyof BuildingStructuralMaterial, value: string) => void, onRemove: (id: number) => void }> = ({ bsm, floorCount, onChange, onRemove }) => (
-    <div key={bsm.id} className="grid grid-cols-12 gap-2 items-center bg-white border border-gray-200 p-3 rounded-md shadow-sm mb-3">
-        <div className="col-span-4">
-            <SelectField
-                label="Part"
-                name="part"
-                value={bsm.part}
-                onChange={(_e: any) => onChange(bsm.id, 'part', _e.target.value)}
-                options={BSM_PARTS}
-                required
-            />
-        </div>
-        <div className="col-span-3">
-            <SelectField
-                label="Floor (Optional)"
-                name="floor_no"
-                value={bsm.floor_no}
-                onChange={(_e: any) => onChange(bsm.id, 'floor_no', _e.target.value)}
-                options={Array.from({ length: floorCount }, (_, i) => (i + 1).toString())}
-            />
-        </div>
-        <div className="col-span-4">
-            <InputField
-                label="Material"
-                name="material"
-                value={bsm.material}
-                onChange={(_e: any, val: string) => onChange(bsm.id, 'material', val)}
-                required
-            />
-        </div>
-        <div className="col-span-1 flex justify-end">
-            <button
-                type="button"
-                onClick={() => onRemove(bsm.id)}
-                className="p-1 text-red-500 hover:text-red-700 transition self-end"
-                title="Remove Material"
-            >
-                <Trash2 className="w-5 h-5" />
-            </button>
-        </div>
-    </div>
-);
-
-const BuildingAdditionalItemForm: React.FC<{ bai: BuildingAdditionalItem, onChange: (id: number, name: keyof BuildingAdditionalItem, value: string | number) => void, onRemove: (id: number) => void }> = ({ bai, onChange, onRemove }) => (
-    <div key={bai.id} className="grid grid-cols-12 gap-3 items-center bg-white border border-gray-200 p-3 rounded-md shadow-sm mb-3">
-        <div className="col-span-5">
-            <InputField
-                label="Item Name"
-                name="item_name"
-                value={bai.item_name}
-                onChange={(_e: any, val: string) => onChange(bai.id, 'item_name', val)}
-                required
-            />
-        </div>
-        <div className="col-span-2">
-            <InputField
-                label="Qty"
-                name="quantity"
-                value={bai.quantity}
-                onChange={(_e: any, val: number) => onChange(bai.id, 'quantity', val)}
-                type="number"
-                min="1"
-                step="1"
-                required
-            />
-        </div>
-        <div className="col-span-3">
-            <InputField
-                label="Unit Cost"
-                name="unit_cost"
-                value={bai.unit_cost}
-                onChange={(_e: any, val: number) => onChange(bai.id, 'unit_cost', val)}
-                type="number"
-                min="0"
-                step="0.01"
-                required
-            />
-        </div>
-        <div className="col-span-2 flex justify-between items-end">
-            <p className="text-sm font-medium text-gray-700 ml-2">
-                {bai.total_cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </p>
-            <button
-                type="button"
-                onClick={() => onRemove(bai.id)}
-                className="p-1 text-red-500 hover:text-red-700 transition"
-                title="Remove Item"
-            >
-                <Trash2 className="w-5 h-5" />
-            </button>
-        </div>
-    </div>
-);
+const getSafeDateValue = (val: any) => {
+    if (!val) return '';
+    if (typeof val === 'string' && val.length === 10 && val.includes('-')) return val;
+    const date = new Date(val);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-CA');
+};
 
 const calculateMachineryValues = (data: MachinerySpecificData): MachinerySpecificData => {
     const today = new Date().getFullYear();
@@ -379,6 +254,278 @@ const calculateMachineryValues = (data: MachinerySpecificData): MachinerySpecifi
     };
 };
 
+// --- Reusable UI Components ---
+
+interface SelectOption {
+    label: string;
+    value: string | number;
+}
+
+interface SearchableSelectProps {
+    options: SelectOption[];
+    value: string | number | undefined;
+    onChange: (val: any) => void;
+    placeholder?: string;
+    isLoading?: boolean;
+    disabled?: boolean;
+    className?: string;
+}
+
+const SearchableSelect: React.FC<SearchableSelectProps> = ({
+    options,
+    value,
+    onChange,
+    placeholder = "Select...",
+    isLoading = false,
+    disabled = false,
+    className = ""
+}) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const [search, setSearch] = useState("");
+    const wrapperRef = useRef<HTMLDivElement>(null);
+
+    const selectedOption = options.find(o => String(o.value) === String(value));
+    const displayLabel = selectedOption ? selectedOption.label : (value || placeholder);
+    
+    const filtered = options.filter(o => 
+        o.label.toString().toLowerCase().includes(search.toLowerCase())
+    );
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    useEffect(() => {
+        if (isOpen) setSearch("");
+    }, [isOpen]);
+
+    return (
+        <div className={`relative ${className}`} ref={wrapperRef}>
+            <div
+                onClick={() => !disabled && setIsOpen(!isOpen)}
+                className={`
+                    w-full border rounded-lg px-3 py-2 text-sm flex items-center justify-between cursor-pointer bg-white transition-all
+                    ${isOpen ? 'ring-2 ring-emerald-500/20 border-emerald-500' : 'border-slate-300 hover:border-emerald-400'}
+                    ${disabled ? 'opacity-60 cursor-not-allowed bg-slate-50' : ''}
+                `}
+            >
+                <span className={`truncate ${!value && !selectedOption ? "text-slate-400" : "text-slate-800"}`}>
+                    {displayLabel}
+                </span>
+                {isLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-slate-400 flex-shrink-0" />
+                ) : (
+                    <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                )}
+            </div>
+
+            {isOpen && !disabled && (
+                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                    <div className="p-2 border-b border-slate-100 bg-slate-50">
+                        <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                            <input 
+                                autoFocus
+                                type="text" 
+                                className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                                placeholder="Search..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="overflow-y-auto flex-1">
+                        {isLoading ? (
+                            <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+                            </div>
+                        ) : filtered.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-slate-400">
+                                No results found.
+                            </div>
+                        ) : (
+                            filtered.map(opt => (
+                                <div 
+                                    key={opt.value}
+                                    onClick={() => {
+                                        onChange(opt.value);
+                                        setIsOpen(false);
+                                    }}
+                                    className={`
+                                        px-3 py-2 text-sm cursor-pointer hover:bg-emerald-50 flex items-center justify-between
+                                        ${String(opt.value) === String(value) ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-slate-700'}
+                                    `}
+                                >
+                                    <span className="truncate">{opt.label}</span>
+                                    {String(opt.value) === String(value) && <Check className="w-3.5 h-3.5 flex-shrink-0 text-emerald-600" />}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+const YearSelect: React.FC<any> = ({ label, name, value, onChange, required = false, isFullWidth = false, readOnly = false, startYear = 1950, endYear = new Date().getFullYear() + 5 }) => {
+    const years = useMemo(() => {
+        const yearArray = [];
+        for (let i = endYear; i >= startYear; i--) yearArray.push(i);
+        return yearArray;
+    }, [startYear, endYear]);
+
+    return (
+        <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                {label} {required && <span className="text-red-500">*</span>}
+            </label>
+            <SearchableSelect
+                options={years.map(y => ({ label: String(y), value: y }))}
+                value={value}
+                onChange={(val) => onChange({ target: { name, value: val } } as any, val)}
+                disabled={readOnly}
+                placeholder="Select Year"
+            />
+        </div>
+    );
+};
+
+const DatePickerField: React.FC<any> = ({ label, name, value, onChange, required = false, isFullWidth = false, readOnly = false, min = undefined, max = undefined }) => (
+    <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
+        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+            {label} {required && <span className="text-red-500">*</span>}
+        </label>
+        <input
+            type="date"
+            name={name}
+            value={getSafeDateValue(value)}
+            onChange={(e) => onChange(e, e.target.value)}
+            required={required}
+            readOnly={readOnly}
+            min={min}
+            max={max}
+            className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:bg-slate-100 disabled:text-slate-500 placeholder:text-slate-400
+            ${readOnly ? 'bg-slate-50 cursor-not-allowed' : 'bg-white'} [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:hover:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
+        />
+    </div>
+);
+
+const InputField: React.FC<any> = ({ label, name, value, onChange, type = 'text', required = false, isFullWidth = false, readOnly = false, min = undefined, step = undefined, placeholder = '' }) => (
+    <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
+        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+            {label} {required && <span className="text-red-500">*</span>}
+        </label>
+        <input
+            type={type}
+            name={name}
+            value={value === undefined || value === null ? '' : value}
+            onChange={(e) => {
+                const val = type === 'number' ? parseNumericValue(e.target.value) : e.target.value;
+                onChange(e, val);
+            }}
+            required={required}
+            readOnly={readOnly}
+            min={min}
+            step={step}
+            placeholder={placeholder}
+            className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:bg-slate-100 disabled:text-slate-500 placeholder:text-slate-400
+            ${readOnly ? 'bg-slate-50 cursor-not-allowed' : 'bg-white'}`}
+        />
+    </div>
+);
+
+const SelectField: React.FC<any> = ({ label, name, value, values, onChange, options, required = false, readOnly = false, isFullWidth = false }) => {
+    const mappedOptions = options.map((opt: string, index: number) => ({
+        label: opt,
+        value: values ? values[index] : opt
+    }));
+
+    return (
+        <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                {label} {required && <span className="text-red-500">*</span>}
+            </label>
+            <SearchableSelect
+                options={mappedOptions}
+                value={value}
+                onChange={(val) => {
+                    onChange({ target: { name, value: val } } as any, val);
+                }}
+                disabled={readOnly || options.length === 0}
+                placeholder={options.length === 0 ? `Loading...` : `Select ${label.replace('*', '').trim()}`}
+            />
+        </div>
+    );
+};
+
+const TextAreaField: React.FC<any> = ({ label, name, value, onChange, required = false, readOnly = false, isFullWidth = false }) => (
+    <div className={isFullWidth ? "sm:col-span-2" : "sm:col-span-1"}>
+        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+            {label} {required && <span className="text-red-500">*</span>}
+        </label>
+        <textarea
+            name={name}
+            value={value}
+            onChange={onChange}
+            required={required}
+            rows={2}
+            readOnly={readOnly}
+            className={`w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all disabled:bg-slate-100 disabled:text-slate-500
+            ${readOnly ? 'bg-slate-50 cursor-not-allowed' : 'bg-white'}`}
+        />
+    </div>
+);
+
+// --- Sub-Form Components ---
+
+const BuildingFloorAreaInput: React.FC<{ floor: BuildingFloorArea; onChange: (floorNo: number, value: number) => void; }> = ({ floor, onChange }) => (
+    <InputField key={`floor-${floor.floor_no}`} label={`Area - Floor ${floor.floor_no}`} name={`floor_area_${floor.floor_no}`} value={floor.floor_area} onChange={(_e: any, val: number) => onChange(floor.floor_no, val)} type="number" min="0.01" step="0.01" required />
+);
+
+const BuildingStructuralMaterialForm: React.FC<any> = ({ bsm, floorCount, onChange, onRemove }) => (
+    <div key={bsm.id} className="grid grid-cols-12 gap-2 items-center bg-white border border-slate-200 p-3 rounded-lg shadow-sm mb-3">
+        <div className="col-span-4"><SelectField label="Part" name="part" value={bsm.part} onChange={(_e: any) => onChange(bsm.id, 'part', _e.target.value)} options={BSM_PARTS} required /></div>
+        <div className="col-span-3"><SelectField label="Floor (Opt)" name="floor_no" value={bsm.floor_no} onChange={(_e: any) => onChange(bsm.id, 'floor_no', _e.target.value)} options={Array.from({ length: floorCount }, (_, i) => (i + 1).toString())} /></div>
+        <div className="col-span-4"><InputField label="Material" name="material" value={bsm.material} onChange={(_e: any, val: string) => onChange(bsm.id, 'material', val)} required /></div>
+        <div className="col-span-1 flex justify-end"><button type="button" onClick={() => onRemove(bsm.id)} className="p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 rounded transition self-end"><Trash2 className="w-5 h-5" /></button></div>
+    </div>
+);
+
+const BuildingAdditionalItemForm: React.FC<any> = ({ bai, onChange, onRemove, options }) => (
+    <div key={bai.id} className="grid grid-cols-12 gap-3 items-center bg-white border border-slate-200 p-3 rounded-lg shadow-sm mb-3">
+        <div className="col-span-6">
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                Item Name <span className="text-red-500">*</span>
+            </label>
+            <SearchableSelect
+                options={options.map((opt: any) => ({ label: opt.item_name, value: opt.item_name }))}
+                value={bai.item_name}
+                onChange={(val) => onChange(bai.id, 'item_name', val)}
+                placeholder="Select Item"
+            />
+        </div>
+        <div className="col-span-2">
+            <InputField label="Qty" name="quantity" value={bai.quantity} onChange={(_e: any, val: number) => onChange(bai.id, 'quantity', val)} type="number" min="1" step="1" required />
+        </div>
+        <div className="col-span-3">
+            <InputField label="Unit Cost" name="unit_cost" value={bai.unit_cost} onChange={(_e: any, val: number) => onChange(bai.id, 'unit_cost', val)} type="number" min="0" step="0.01" required />
+        </div>
+        <div className="col-span-1 flex justify-end items-end pb-1">
+            <button type="button" onClick={() => onRemove(bai.id)} className="p-1.5 text-red-500 hover:bg-red-50 hover:text-red-700 rounded transition"><Trash2 className="w-5 h-5" /></button>
+        </div>
+    </div>
+);
+
+// --- Main Revision Component ---
+
 export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
     showDialog,
     setShowDialog,
@@ -395,7 +542,7 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
     const [LAND_PSC_CODES, setLAND_PSC_CODES] = useState<string[]>([]);
     const [LAND_PSC_IDS, setLAND_PSC_IDS] = useState<{[key: string]: number}>({}); 
     
-    const [LAND_AU_OPTIONS, setLAND_AU_OPTIONS] = useState<any[]>([]); // Full object for AL lookup
+    const [LAND_AU_OPTIONS, setLAND_AU_OPTIONS] = useState<any[]>([]); 
     const [LAND_AU_CODES, setLAND_AU_CODES] = useState<string[]>([]);
     
     const [BK_CODES, setBK_CODES] = useState<string[]>([]);
@@ -405,16 +552,25 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
     
     const [BUILDING_AU_OPTIONS, setBUILDING_AU_OPTIONS] = useState<any[]>([]);
     const [BUILDING_AU_CODES_LIST, setBUILDING_AU_CODES_LIST] = useState<string[]>([]);
-    const [BUILDING_AU_VALUES, setBUILDING_AU_VALUES] = useState<string[]>([]); // Values are codes usually for building actual use
+    const [BUILDING_AU_VALUES, setBUILDING_AU_VALUES] = useState<string[]>([]);
 
     const [MT_CODES, setMT_CODES] = useState([]);
     const [MT_VALUES, setMT_VALUES] = useState([]);
     
     const [MAU_OPTIONS, setMAU_OPTIONS] = useState<any[]>([]);
     const [MAU_CODES, setMAU_CODES] = useState([]);
-    const [MAU_VALUES, setMAU_VALUES] = useState([]); // Values
+    const [MAU_VALUES, setMAU_VALUES] = useState([]); 
     
     const [revisionYears, setRevisionYears] = useState<any[]>([]);
+
+    // Owner Management States
+    const [availableOwners, setAvailableOwners] = useState<OwnerOption[]>([]);
+    const [selectedOwners, setSelectedOwners] = useState<OwnerOption[]>([]);
+    const [selectedOwnerToAdd, setSelectedOwnerToAdd] = useState<string>(''); 
+
+    // Land Improvement & Building Additionals Options
+    const [landImprovementOptions, setLandImprovementOptions] = useState<LandImprovementOption[]>([]);
+    const [buildingItemOptions, setBuildingItemOptions] = useState<BuildingItemOption[]>([]);
 
     const [selectedLGCode, setSelectedLGCode] = useState('');
     const [selectedPCCode, setSelectedPCCode] = useState('');
@@ -456,8 +612,6 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
     const [nextAdjustmentId, setNextAdjustmentId] = useState(1);
     const [nextBSMId, setNextBSMId] = useState(1);
     const [nextBAIId, setNextBAIId] = useState(1);
-    
-    const [originalData, setOriginalData] = useState<any>(null);
 
     // Load existing FAAS data
     useEffect(() => {
@@ -467,17 +621,13 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                 try {
                     const response = await api.get(`faas/${faasId}`);
                     const data = response.data;
-                    setOriginalData(data);
-                    
                     const faas = data.faas;
 
                     // 1. Map Master Data
                     setMasterData({
                         arp_no: faas.faas_no,
                         pin: faas.pin || '',
-                        owner_name: faas.owner_name,
-                        owner_address: faas.owner_address,
-                        lg_code: faas.lg_code,
+                        lg_code: faas.lg_code || '',
                         barangay: faas.barangay || '',
                         lot_no: faas.lot_no || '',
                         block_no: faas.block_no || '',
@@ -486,6 +636,10 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                         status: faas.status,
                     });
                     setSelectedLGCode(faas.lg_code);
+
+                    if (data.owners && Array.isArray(data.owners)) {
+                        setSelectedOwners([...data.owners]);
+                    }
 
                     // 2. Initialize Variables
                     let initUnitVal = 0;
@@ -503,7 +657,6 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                         initAssLevel = parseFloat(ass.assessment_level || '0');
 
                         const pcCode = extractCode(app.classification);
-                        // console.log(await api);
                         setLandData({
                             pc_code: pcCode,
                             au_code: extractCode(ass.actual_use),
@@ -535,8 +688,6 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                              }));
                              setAdjustmentFactors(loadedAdj);
                              setNextAdjustmentId(loadedAdj.length + 1);
-                        } else {
-                            setAdjustmentFactors([]);
                         }
 
                     } else if (faas.property_kind === 'Building' && data.building) {
@@ -569,6 +720,7 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                             unit_cost: parseFloat(a.unit_cost),
                             total_cost: parseFloat(a.total_cost)
                         })) || [];
+
                         const bau_id = await api.get(`p/bauID/${extractCode(ass.actual_use)}`);
                         const st_id = await api.get(`p/stID/${extractCode(gen.structuralType)}`);
                         const bk_id = await api.get(`p/bkID/${extractCode(gen.buildingKind)}`);
@@ -598,7 +750,7 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                         initAssLevel = parseFloat(ass.assessment_level || '0');
                         initDeprRate = parseFloat(app.depreciation_rate || '0');
 
-                        const mau_id = await api.get(`p/mauID/${extractCode(ass.actual_use)}`)
+                        const mau_id = await api.get(`p/mauID/${extractCode(ass.actual_use)}`);
 
                         setMachineryData({
                             ...initialMachineryData,
@@ -651,45 +803,59 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
     useEffect(() => {
         const fetchInitialData = async () => {
             try {
-                const lgRes = await api.get('lvg/list');
+                const [lgRes, pcRes, auRes, bkRes, stRes, bauRes, mtRes, mauRes, ownersRes, landImpRes, baiRes, ryRes] = await Promise.all([
+                    api.get('lvg/list'),
+                    api.get('p/plist'),
+                    api.get('p/augetlist'),
+                    api.get('p/bklist'),
+                    api.get('p/stlist'),
+                    api.get('p/baulist'),
+                    api.get('p/mtlist'),
+                    api.get('p/maulist'),
+                    api.get('ol/'),
+                    api.get('loi/uv/'), 
+                    api.get('bai/uv/'),
+                    api.get('ry/list')
+                ]);
+
                 setLG_OPTIONS(lgRes.data.data.map((item: any) => ({ id: item.lg_id, code: item.code })));
                 setLG_CODES(lgRes.data.data.map((item: any) => item.code));
 
-                const pcRes = await api.get('p/plist');
                 setPC_CODES(pcRes.data.map((item: any) => item.code));
                 setPC_NAMES(pcRes.data.map((item: any) => item.classname));
 
-                // Land Actual Use (With Assessment Level)
-                const auRes = await api.get('p/augetlist');
-                setLAND_AU_OPTIONS(auRes.data); // Store full object
+                setLAND_AU_OPTIONS(auRes.data);
                 setLAND_AU_CODES(auRes.data.map((item: any) => item.code));
 
-                const bkRes = await api.get('p/bklist');
                 setBK_CODES(bkRes.data.data.map((item: any) => item.code));
                 setBK_VALUES(bkRes.data.data.map((item: any) => item.bk_id));
 
-                const stRes = await api.get('p/stlist');
                 setSTRUCTURAL_TYPES(stRes.data.data.map((item: any) => item.code));
                 setSTRUCTURAL_VALUES(stRes.data.data.map((item: any) => item.st_id));
 
-                // Building Actual Use (With Assessment Level)
-                const bauRes = await api.get('p/baulist');
-                setBUILDING_AU_OPTIONS(bauRes.data.data); // Store full object
+                setBUILDING_AU_OPTIONS(bauRes.data.data);
                 setBUILDING_AU_CODES_LIST(bauRes.data.data.map((item: any) => item.code));
-                setBUILDING_AU_VALUES(bauRes.data.data.map((item: any) => item.code)); // Using code as value for now per typical use
+                setBUILDING_AU_VALUES(bauRes.data.data.map((item: any) => item.bau_id));
 
-                const mtRes = await api.get('p/mtlist');
                 setMT_CODES(mtRes.data.data.map((item: any) => item.code));
                 setMT_VALUES(mtRes.data.data.map((item: any) => item.mt_id));
 
-                // Machinery Actual Use (With Assessment Level)
-                const mauRes = await api.get('p/maulist');
-                setMAU_OPTIONS(mauRes.data.data); // Store full object
+                setMAU_OPTIONS(mauRes.data.data);
                 setMAU_CODES(mauRes.data.data.map((item: any) => item.code));
-                setMAU_VALUES(mauRes.data.data.map((item: any) => item.code)); // Using code as value
+                setMAU_VALUES(mauRes.data.data.map((item: any) => item.mau_id));
 
-                const ryRes = await api.get('ry/list');
-                setRevisionYears(ryRes.data);
+                const ownersList = ownersRes.data.data || ownersRes.data;
+                if(Array.isArray(ownersList)) setAvailableOwners(ownersList);
+                
+                const landImps = landImpRes.data.data || landImpRes.data;
+                if(Array.isArray(landImps)) setLandImprovementOptions(landImps);
+
+                const baiItems = baiRes.data.data || baiRes.data;
+                if(Array.isArray(baiItems)) setBuildingItemOptions(baiItems);
+
+                const ryList = ryRes.data.data || ryRes.data;
+                if(Array.isArray(ryList)) setRevisionYears(ryList);
+
             } catch (error) {
                 console.error("Error fetching initial lookup data:", error);
             }
@@ -697,31 +863,73 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
         fetchInitialData();
     }, []);
 
-    // Dependent Dropdowns & SMV Lookup Helpers
+    // --- AUTO UPDATE LOADED ITEMS WITH LATEST UNIT VALUES ---
+    
+    // For Land Improvements
+    useEffect(() => {
+        if (landImprovementOptions.length > 0 && improvements.length > 0) {
+            setImprovements(prev => {
+                let hasChanges = false;
+                const updated = prev.map(imp => {
+                    const matchedOpt = landImprovementOptions.find(opt => opt.improvement_name === imp.improvement_name);
+                    // If matched and the unit value differs, update it with the latest reference data
+                    if (matchedOpt && matchedOpt.unit_value !== imp.unit_value) {
+                        hasChanges = true;
+                        return {
+                            ...imp,
+                            item_id: matchedOpt.item_id,
+                            value_id: matchedOpt.value_id,
+                            unit_value: matchedOpt.unit_value,
+                            base_market_value: imp.quantity * matchedOpt.unit_value
+                        };
+                    }
+                    return imp;
+                });
+                return hasChanges ? updated : prev;
+            });
+        }
+    }, [landImprovementOptions]);
+
+    // For Building Additional Items
+    useEffect(() => {
+        if (buildingItemOptions.length > 0 && buildingData.additional_items.length > 0) {
+            setBuildingData(prev => {
+                let hasChanges = false;
+                const updatedItems = prev.additional_items.map(bai => {
+                    const matchedOpt = buildingItemOptions.find(opt => opt.item_name === bai.item_name);
+                    // If matched and the unit value differs, update it with the latest reference data
+                    if (matchedOpt && matchedOpt.unit_value !== bai.unit_cost) {
+                        hasChanges = true;
+                        return {
+                            ...bai,
+                            item_id: matchedOpt.item_id,
+                            unit_cost: matchedOpt.unit_value,
+                            total_cost: Number(bai.quantity || 0) * matchedOpt.unit_value
+                        };
+                    }
+                    return bai;
+                });
+                return hasChanges ? { ...prev, additional_items: updatedItems } : prev;
+            });
+        }
+    }, [buildingItemOptions]);
+
+    // Dependent Dropdowns
     useEffect(() => {
         const fetchBarangays = async () => {
-            if (!selectedLGCode) {
-                setBARANGAY_CODES([]);
-                return;
-            }
+            if (!selectedLGCode) { setBARANGAY_CODES([]); return; }
             try {
                 const lgIdRes = await api.get('lvg/getID', { params: { code: selectedLGCode } });
-                const lg_id = lgIdRes.data.lg_id;
-                const brgyRes = await api.get('lvg/barangayList', { params: { lg_id } });
+                const brgyRes = await api.get('lvg/barangayList', { params: { lg_id: lgIdRes.data.lg_id } });
                 setBARANGAY_CODES(brgyRes.data.map((item: any) => item.barangay_name));
-            } catch (error) {
-                console.error("Error fetching barangay list:", error);
-            }
+            } catch (error) { console.error("Error fetching barangays:", error); }
         };
         fetchBarangays();
     }, [selectedLGCode]);
 
     useEffect(() => {
         const fetchSubClass = async () => {
-            if (!selectedPCCode) {
-                setLAND_PSC_CODES([]);
-                return;
-            }
+            if (!selectedPCCode) { setLAND_PSC_CODES([]); return; }
             try {
                 const pcIdRes = await api.get('p/getCID', { params: { code: selectedPCCode } });
                 const pc_id = pcIdRes.data.pc_id;
@@ -731,14 +939,19 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                 const idMap: {[key: string]: number} = {};
                 pscRes.data.forEach((item: any) => { idMap[item.code] = item.psc_id; });
                 setLAND_PSC_IDS(idMap);
-            } catch (error) {
-                console.error("Error fetching sub-classification list:", error);
-            }
+            } catch (error) { console.error("Error fetching subclasses:", error); }
         };
         fetchSubClass();
     }, [selectedPCCode]);
 
-    // --- SMV FETCH LOGIC ---
+    // Update FAAS Area when Land Area changes
+    useEffect(() => {
+        if (masterData.property_kind === 'Land') {
+            setFaasDataState(prev => ({ ...prev, area: Number(landData.lot_area) || 0 }));
+        }
+    }, [landData.lot_area, masterData.property_kind]);
+
+    // SMV Fetch Logic
     useEffect(() => {
         const fetchSMV = async () => {
             if (!faasDataState.ry_id) return;
@@ -774,7 +987,6 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
         const timeoutId = setTimeout(() => fetchSMV(), 500);
         return () => clearTimeout(timeoutId);
     }, [faasDataState.ry_id, faasDataState.lg_code, landData.psc_code, buildingData.bk_id, buildingData.st_id, machineryData.mt_id, masterData.property_kind, LG_OPTIONS, LAND_PSC_IDS]);
-
 
     // Machinery Calculations
     useEffect(() => {
@@ -870,7 +1082,6 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
             const { name } = e.target;
             const finalValue = value !== undefined ? value : e.target.value;
 
-            // Update State
             if (masterData.property_kind === 'Land' && name === 'pc_code') {
                 setSelectedPCCode(finalValue as string);
                 setter((prev: LandSpecificData) => ({ ...prev, [name]: finalValue as any, psc_code: '' }));
@@ -883,28 +1094,44 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
             }
 
             // UPDATE ASSESSMENT LEVEL on Actual Use Change
-            if (name === 'au_code') { // Land
+            if (name === 'au_code') { 
                 const found = LAND_AU_OPTIONS.find(opt => opt.code === finalValue);
                 if (found) setAssessmentLevel(parseFloat(found.assessment_level || '0'));
-            } else if (name === 'bau_id') { // Building
-                const found = BUILDING_AU_OPTIONS.find(opt => opt.code === finalValue); // value is code
+            } else if (name === 'bau_id') { 
+                const found = BUILDING_AU_OPTIONS.find(opt => opt.code === finalValue);
                 if (found) setAssessmentLevel(parseFloat(found.assessment_level || '0'));
-            } else if (name === 'mau_id') { // Machinery
+            } else if (name === 'mau_id') { 
                 const found = MAU_OPTIONS.find(opt => opt.code === finalValue);
                 if (found) setAssessmentLevel(parseFloat(found.assessment_level || '0'));
             }
         };
 
-    // ... [Keep Building Handlers: handleFloorAreaChange, Add/Remove BSM/BAI] ...
+    // Owner Handlers
+    const handleAddOwner = () => {
+        if (!selectedOwnerToAdd) return;
+        const ownerToAdd = availableOwners.find(o => String(o.owner_id) === selectedOwnerToAdd);
+        if (ownerToAdd && !selectedOwners.some(o => o.owner_id === ownerToAdd.owner_id)) {
+            setSelectedOwners(prev => [...prev, ownerToAdd]);
+        }
+        setSelectedOwnerToAdd('');
+    };
+
+    const handleRemoveOwner = (id: number) => {
+        setSelectedOwners(prev => prev.filter(o => o.owner_id !== id));
+    };
+
+    // Building Sub-handlers
     const handleFloorAreaChange = useCallback((floorNo: number, value: number) => {
         setBuildingData(prev => ({ ...prev, floor_areas: prev.floor_areas.map(fa => fa.floor_no === floorNo ? { ...fa, floor_area: value } : fa), }));
     }, []);
+    
     useEffect(() => {
         if (masterData.property_kind === 'Building') {
             const total = buildingData.floor_areas.reduce((sum, f) => sum + parseFloat(String(f.floor_area || 0)), 0);
             setFaasDataState(prev => ({ ...prev, area: total }));
         }
     }, [buildingData.floor_areas, masterData.property_kind]);
+    
     useEffect(() => {
         const newStoreys = parseInt(buildingData.no_of_storeys as string, 10);
         if (isNaN(newStoreys) || newStoreys < 1) return;
@@ -923,15 +1150,51 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
     const handleAddBSM = useCallback(() => { setBuildingData(prev => ({ ...prev, structural_materials: [...prev.structural_materials, { id: nextBSMId, part: '', floor_no: '', material: '' }] })); setNextBSMId(prev => prev + 1); }, [nextBSMId]);
     const handleRemoveBSM = useCallback((id: number) => setBuildingData(prev => ({ ...prev, structural_materials: prev.structural_materials.filter(bsm => bsm.id !== id) })), []);
     const handleBSMChange = useCallback((id: number, name: keyof BuildingStructuralMaterial, value: string) => setBuildingData(prev => ({ ...prev, structural_materials: prev.structural_materials.map(bsm => bsm.id === id ? { ...bsm, [name]: value } : bsm) })), []);
-    const handleAddBAI = useCallback(() => { setBuildingData(prev => ({ ...prev, additional_items: [...prev.additional_items, { id: nextBAIId, item_name: '', quantity: '', unit_cost: '', total_cost: 0 }] })); setNextBAIId(prev => prev + 1); }, [nextBAIId]);
+    
+    const handleAddBAI = useCallback(() => { setBuildingData(prev => ({ ...prev, additional_items: [...prev.additional_items, { id: nextBAIId, quantity: '', unit_cost: '', total_cost: 0 }] })); setNextBAIId(prev => prev + 1); }, [nextBAIId]);
     const handleRemoveBAI = useCallback((id: number) => setBuildingData(prev => ({ ...prev, additional_items: prev.additional_items.filter(bai => bai.id !== id) })), []);
-    const handleBAIChange = useCallback((id: number, name: keyof BuildingAdditionalItem, value: string | number) => { setBuildingData(prev => ({ ...prev, additional_items: prev.additional_items.map(bai => { if (bai.id !== id) return bai; const newBai: BuildingAdditionalItem = { ...bai, [name]: value }; const quantity = newBai.quantity as number || 0; const unit_cost = newBai.unit_cost as number || 0; newBai.total_cost = quantity * unit_cost; return newBai; }) })); }, []);
-    const totalBAIValue = useMemo(() => buildingData.additional_items.reduce((sum, item) => sum + item.total_cost, 0), [buildingData.additional_items]);
+    const handleBAIChange = useCallback((id: number, name: keyof BuildingAdditionalItem, value: string | number) => { 
+        setBuildingData(prev => ({ ...prev, additional_items: prev.additional_items.map(bai => { 
+            if (bai.id !== id) return bai; 
+            if (name === 'item_name') {
+                const selectedOpt = buildingItemOptions.find(opt => opt.item_name === value);
+                if (selectedOpt) {
+                    return { ...bai, item_id: selectedOpt.item_id, item_name: selectedOpt.item_name, unit_cost: selectedOpt.unit_value, total_cost: (bai.quantity as number || 0) * selectedOpt.unit_value };
+                }
+            }
+            const newBai: BuildingAdditionalItem = { ...bai, [name]: value }; 
+            const quantity = newBai.quantity as number || 0; 
+            const unit_cost = newBai.unit_cost as number || 0; 
+            newBai.total_cost = quantity * unit_cost; 
+            return newBai; 
+        }) })); 
+    }, [buildingItemOptions]);
 
-    // ... [Keep Land Improvement Handlers] ...
+    // Land Improvement Handlers
     const handleAddImprovement = useCallback(() => { setImprovements(prev => [...prev, { id: nextLandImprovementId, improvement_name: '', quantity: 1, unit_value: 0, base_market_value: 0, remarks: '' }]); setNextLandImprovementId(prev => prev + 1); }, [nextLandImprovementId]);
     const handleRemoveImprovement = useCallback((id: number) => setImprovements(prev => prev.filter(imp => imp.id !== id)), []);
-    const handleImprovementChange = useCallback((id: number, name: keyof LandImprovement, value: string | number) => { setImprovements(prev => prev.map(imp => { if (imp.id !== id) return imp; const newImp: LandImprovement = { ...imp, [name]: value as any }; if (name === 'quantity' || name === 'unit_value') { const quantity = newImp.quantity as number || 0; const unit_value = newImp.unit_value as number || 0; newImp.base_market_value = quantity * unit_value; } return newImp; })); }, []);
+    const handleImprovementChange = useCallback((id: number, name: keyof LandImprovement, value: string | number) => { 
+        setImprovements(prev => prev.map(imp => { 
+            if (imp.id !== id) return imp; 
+            const newImp: LandImprovement = { ...imp, [name]: value as any }; 
+            
+            // Auto-populate unit value if a new predefined improvement is selected
+            if (name === 'improvement_name') {
+                const selectedOpt = landImprovementOptions.find(o => o.improvement_name === value);
+                if (selectedOpt) {
+                    newImp.unit_value = selectedOpt.unit_value;
+                    newImp.base_market_value = newImp.quantity * selectedOpt.unit_value;
+                }
+            }
+
+            if (name === 'quantity' || name === 'unit_value') { 
+                const quantity = newImp.quantity as number || 0; 
+                const unit_value = newImp.unit_value as number || 0; 
+                newImp.base_market_value = quantity * unit_value; 
+            } 
+            return newImp; 
+        })); 
+    }, [landImprovementOptions]);
 
     // Adjustment Handlers
     const handleAddAdjustment = () => { setAdjustmentFactors(prev => [...prev, { id: nextAdjustmentId, factor_name: '', percent_adjustment: 0, remarks: '' }]); setNextAdjustmentId(prev => prev + 1); };
@@ -946,6 +1209,7 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                 faas_id: faasId,
                 revision_date: revisionDate,
                 remarks: revisionRemarks,
+                owner_ids: selectedOwners.map(o => o.owner_id),
                 master_data: masterData,
                 faas_core: { ...faasDataState, ry_id: parseInt(faasDataState.ry_id) },
                 specific_data: masterData.property_kind === 'Land' ? { ...landData, property_kind: 'Land' } : masterData.property_kind === 'Building' ? { ...buildingData, property_kind: 'Building'} : { ...machineryData, property_kind: 'Machinery'},
@@ -960,8 +1224,8 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
             };
             console.log(payload);
             await api.post('faas/revision', payload);
-            setSubmissionSuccessful(true);
-            setRefresh(prev => !prev);
+            // setSubmissionSuccessful(true);
+            // setRefresh(prev => !prev);
         } catch (error: any) {
             console.error("Revision failed:", error);
             setSubmitError(error.response?.data?.message || 'Failed to submit revision.');
@@ -986,58 +1250,116 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
 
     if (submissionSuccessful) {
         return (
-            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-10 flex flex-col items-center text-center">
-                    <CheckCircle className="w-20 h-20 text-emerald-500 mb-6 animate-pulse" />
-                    <h2 className="text-3xl font-bold text-gray-900 mb-2">Revision Successful!</h2>
-                    <p className="text-lg text-gray-600 mb-8">The FAAS has been successfully revised.</p>
-                    <button onClick={handleCloseOnSuccess} className="px-8 py-3 text-lg font-medium text-white rounded-xl bg-emerald-600 hover:bg-emerald-700">Close</button>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" role="dialog">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-10 flex flex-col items-center text-center">
+                    <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-6 animate-bounce">
+                        <CheckCircle className="w-10 h-10 text-emerald-600" />
+                    </div>
+                    <h2 className="text-2xl font-bold text-slate-800 mb-2">Revision Successful!</h2>
+                    <p className="text-slate-600 mb-8">The FAAS has been successfully revised and recorded.</p>
+                    <button onClick={handleCloseOnSuccess} className="px-8 py-3 text-sm font-bold text-white rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-lg transition duration-200">Close</button>
                 </div>
             </div>
         );
     }
 
-    if (loadingData) return <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-xl p-8 flex flex-col items-center"><Loader2 className="w-12 h-12 text-emerald-600 animate-spin mb-4" /><p className="text-gray-600">Loading property data...</p></div></div>;
+    if (loadingData) return <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"><div className="bg-white rounded-xl p-8 flex flex-col items-center shadow-lg"><Loader2 className="w-10 h-10 text-emerald-600 animate-spin mb-4" /><p className="text-slate-600 font-medium">Loading property data...</p></div></div>;
 
     return (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col">
-                <div className="p-4 sm:p-6 flex justify-between items-center border-b border-gray-200 bg-emerald-50 rounded-t-xl">
-                    <h2 className="text-2xl font-bold text-gray-900 flex items-center">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden">
+                <div className="px-8 py-5 flex justify-between items-center border-b border-slate-100 bg-white">
+                    <h2 className="text-2xl font-bold text-slate-800 flex items-center">
                         <PropertyIcon kind={masterData.property_kind} />
                         Revise {masterData.property_kind} Record
                     </h2>
-                    <button onClick={handleCancel} className="p-1 rounded-full text-gray-400 hover:bg-gray-100" disabled={submitLoading}><X className="w-6 h-6" /></button>
+                    <button onClick={handleCancel} className="p-2 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition disabled:opacity-50" disabled={submitLoading}><X className="w-6 h-6" /></button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-8">
-                    <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); handleRevisionSubmit(); }}>
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-                            <h3 className="text-sm font-bold text-yellow-800 uppercase tracking-wider mb-3 flex items-center"><History className="w-4 h-4 mr-2" /> Revision Details</h3>
+                <div className="flex-1 overflow-y-auto p-8 space-y-8 bg-slate-50/50">
+                    <form className="space-y-8" onSubmit={(e) => { e.preventDefault(); handleRevisionSubmit(); }}>
+                        
+                        {/* Revision Specifics */}
+                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center mb-4 pb-2 border-b border-slate-100"><History className="w-4 h-4 mr-2 text-emerald-600" /> Revision Details</h3>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <InputField label="Revision Date" type="date" name="revision_date" value={revisionDate} onChange={(_e: any, val: string) => setRevisionDate(val)} required />
+                                <DatePickerField label="Revision Date" name="revision_date" value={revisionDate} onChange={(_e: any, val: string) => setRevisionDate(val)} required />
                                 <div className="sm:col-span-2"><TextAreaField label="Reason for Revision / Remarks" name="remarks" value={revisionRemarks} onChange={(_e: any, val: string) => setRevisionRemarks(_e.target.value)} required isFullWidth /></div>
                             </div>
                         </div>
 
-                        {/* Master Data */}
-                        <div className="border border-gray-200 rounded-lg p-4">
-                            <h3 className="text-lg font-semibold text-gray-700 flex items-center mb-4 border-b pb-2"><ClipboardList className="w-5 h-5 mr-2 text-emerald-500" /> Owner & Registration Info</h3>
+                        {/* Owner Information */}
+                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center mb-4 pb-2 border-b border-slate-100">
+                                <Users className="w-4 h-4 mr-2 text-emerald-600" /> Owner Information
+                            </h3>
+                            <div className="space-y-4">
+                                <div className="flex gap-2 items-end">
+                                    <div className="flex-1">
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Select Owner</label>
+                                        <SearchableSelect
+                                            options={availableOwners.filter(o => !selectedOwners.some(sel => sel.owner_id === o.owner_id)).map(o => ({
+                                                label: `${o.last_name}, ${o.first_name} ${o.middle_name ? `${o.middle_name}.` : ''}`,
+                                                value: o.owner_id
+                                            }))}
+                                            value={selectedOwnerToAdd}
+                                            onChange={(val) => setSelectedOwnerToAdd(String(val))}
+                                            placeholder="Search/Select Owner..."
+                                        />
+                                    </div>
+                                    <button type="button" onClick={handleAddOwner} disabled={!selectedOwnerToAdd} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2 h-[38px]"><UserPlus size={16} /> Add</button>
+                                </div>
+                                {selectedOwners.length > 0 ? (
+                                    <div className="border border-slate-200 rounded-lg overflow-hidden">
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="bg-slate-50 text-slate-500 font-semibold">
+                                                <tr>
+                                                    <th className="px-4 py-2">Name</th>
+                                                    <th className="px-4 py-2">Address</th>
+                                                    <th className="px-4 py-2 text-center w-20">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {selectedOwners.map(owner => (
+                                                    <tr key={owner.owner_id} className="bg-white">
+                                                        <td className="px-4 py-2 font-medium text-slate-900">{owner.last_name}, {owner.first_name} {owner.middle_name}</td>
+                                                        <td className="px-4 py-2 text-slate-600 truncate max-w-xs" title={owner.address_house_no}>{owner.address_house_no || '-'}</td>
+                                                        <td className="px-4 py-2 text-center">
+                                                            <button type="button" onClick={() => handleRemoveOwner(owner.owner_id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded transition"><Trash2 size={16} />
+                                                            </button>
+                                                        </td>
+                                                    </tr>))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                ) : <div className="text-center py-6 bg-slate-50 rounded-lg border border-dashed border-slate-300 text-slate-400 text-sm">No owners selected. Please add at least one owner.</div>}
+                            </div>
+                        </div>
+
+                        {/* Identifiers */}
+                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center mb-4 pb-2 border-b border-slate-100">
+                                <ClipboardList className="w-4 h-4 mr-2 text-emerald-600" /> Property Identifiers
+                            </h3>
                             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                                <InputField label="FAAS No / ARP" name="arp_no" value={masterData.arp_no} onChange={handleMasterChange} required readOnly />
-                                <InputField label="PIN" name="pin" value={masterData.pin} onChange={handleMasterChange} readOnly />
-                                <div className="sm:col-span-2"><InputField label="Owner Name" name="owner_name" value={masterData.owner_name} onChange={handleMasterChange} required isFullWidth /></div>
-                                <div className="sm:col-span-4"><TextAreaField label="Owner Address" name="owner_address" value={masterData.owner_address} onChange={handleMasterChange} isFullWidth /></div>
+                                <InputField label="ARP No." name="arp_no" value={masterData.arp_no} onChange={handleMasterChange} required />
+                                <InputField label="PIN (Parcel ID)" name="pin" value={masterData.pin} onChange={handleMasterChange} />
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-4">
+                                <SelectField label="LGU Code" name="lg_code" value={faasDataState.lg_code} onChange={handleFAASChange} options={LG_CODES} required />
+                                <SelectField label="Barangay" name="barangay" value={masterData.barangay} onChange={handleMasterChange} options={BARANGAY_CODES} required readOnly={!faasDataState.lg_code || BARANGAY_CODES.length === 0} />
+                                <InputField label="Lot No." name="lot_no" value={masterData.lot_no} onChange={handleMasterChange} />
+                                <InputField label="Block No." name="block_no" value={masterData.block_no} onChange={handleMasterChange} />
+                                <div className="sm:col-span-4"><TextAreaField label="Description" name="description" value={masterData.description} onChange={handleMasterChange} isFullWidth /></div>
                             </div>
                         </div>
 
                         {/* Appraisal Parameters */}
-                        <div className="border border-gray-200 rounded-lg p-4">
-                            <h3 className="text-lg font-semibold text-gray-700 flex items-center mb-4 border-b pb-2"><Landmark className="w-5 h-5 mr-2 text-emerald-500" /> Appraisal Parameters</h3>
+                        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide flex items-center mb-4 pb-2 border-b border-slate-100"><Landmark className="w-4 h-4 mr-2 text-emerald-600" /> Appraisal Parameters</h3>
                             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                                 <SelectField label="Revision Year" name="ry_id" value={faasDataState.ry_id} onChange={handleFAASChange} options={revisionYears.map(r=>r.year)} values={revisionYears.map(r=>r.ry_id)} required />
-                                <InputField label="Effectivity Date" type="date" name="effectivity_date" value={faasDataState.effectivity_date} onChange={handleFAASChange} required />
-                                <SelectField label="LGU Code" name="lg_code" value={faasDataState.lg_code} onChange={handleFAASChange} options={LG_CODES} required />
+                                <DatePickerField label="Effectivity Date" name="effectivity_date" value={faasDataState.effectivity_date} onChange={handleFAASChange} required />
                                 
                                 <div className="relative">
                                     <InputField label="Unit Value (Base)" type="number" name="unit_value" value={faasDataState.unit_value} onChange={handleFAASChange} step="0.01" />
@@ -1045,84 +1367,161 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                                 </div>
 
                                 <InputField label={masterData.property_kind === 'Building' ? 'Total Floor Area' : masterData.property_kind === 'Land' ? 'Lot Area' : 'Quantity'} type="number" name="area" value={faasDataState.area} onChange={handleFAASChange} step="0.01" readOnly={masterData.property_kind === 'Building'} />
-                                
-                                {masterData.property_kind === 'Land' && (
-                                    <>
-                                        <SelectField label="Classification" name="pc_code" value={landData.pc_code} onChange={handleSpecificChange(setLandData)} options={PC_NAMES} values={PC_CODES} required />
-                                        <SelectField label="Sub-Class" name="psc_code" value={landData.psc_code} onChange={handleSpecificChange(setLandData)} options={LAND_PSC_CODES} required />
-                                        <SelectField label="Actual Use" name="au_code" value={landData.au_code} onChange={handleSpecificChange(setLandData)} options={LAND_AU_CODES} required />
-                                    </>
-                                )}
-                                {masterData.property_kind === 'Building' && (
-                                    <>
-                                        <SelectField label="Building Kind" name="bk_id" value={buildingData.bk_id} onChange={handleSpecificChange(setBuildingData)} options={BK_CODES} values={BK_VALUES} />
-                                        <SelectField label="Struct Type" name="st_id" value={buildingData.st_id} onChange={handleSpecificChange(setBuildingData)} options={STRUCTURAL_TYPES} values={STRUCTURAL_VALUES} />
-                                        <SelectField label="Actual Use" name="bau_id" value={buildingData.bau_id} onChange={handleSpecificChange(setBuildingData)} options={BUILDING_AU_CODES_LIST} values={BUILDING_AU_VALUES} required />
-                                        <InputField label="Depreciation Rate %" type="number" name="depreciation_rate" value={faasDataState.depreciation_rate} onChange={handleFAASChange} />
-                                    </>
-                                )}
-                                {masterData.property_kind === 'Machinery' && (
-                                    <>
-                                         <SelectField label="Actual Use" name="mau_id" value={machineryData.mau_id} onChange={handleSpecificChange(setMachineryData)} options={MAU_CODES} values={MAU_VALUES} required />
-                                         <InputField label="Depreciation Rate %" type="number" name="depreciation_rate" value={faasDataState.depreciation_rate} onChange={handleFAASChange} />
-                                    </>
-                                )}
                             </div>
                         </div>
 
-                        {/* Land Improvements */}
-                        {masterData.property_kind === 'Land' && (
-                            <div className="border border-gray-200 rounded-lg p-4 bg-emerald-50/20">
-                                <h4 className="text-sm font-bold text-gray-700 mb-3 flex justify-between">Other Improvements <button type="button" onClick={handleAddImprovement} className="px-2 py-1 bg-emerald-500 text-white text-xs rounded"><Plus className="w-3 h-3 inline"/> Add</button></h4>
-                                {improvements.map(imp => (
-                                    <div key={imp.id} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                                        <div className="col-span-5"><InputField placeholder="Name" value={imp.improvement_name} onChange={(_e:any, v:string) => handleImprovementChange(imp.id, 'improvement_name', v)} /></div>
-                                        <div className="col-span-2"><InputField type="number" placeholder="Qty" value={imp.quantity} onChange={(_e:any, v:number) => handleImprovementChange(imp.id, 'quantity', v)} /></div>
-                                        <div className="col-span-4"><InputField type="number" placeholder="Unit Val" value={imp.unit_value} onChange={(_e:any, v:number) => handleImprovementChange(imp.id, 'unit_value', v)} /></div>
-                                        <div className="col-span-1"><button type="button" onClick={() => handleRemoveImprovement(imp.id)} className="text-red-500"><Trash2 className="w-4 h-4"/></button></div>
-                                    </div>
-                                ))}
+                        {/* Specific Details */}
+                        <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-6 shadow-sm">
+                            <h3 className="text-sm font-bold text-emerald-800 uppercase tracking-wide flex items-center mb-4 pb-2 border-b border-emerald-200/50">
+                                {masterData.property_kind} Specific Details
+                            </h3>
+                            
+                            <div className="mb-4">
+                                <InputField label="Property Kind" name="property_kind" value={masterData.property_kind} onChange={handleMasterChange} readOnly />
                             </div>
-                        )}
 
-                        {/* Adjustments (Land Only) */}
-                        {masterData.property_kind === 'Land' && (
-                            <div className="border border-gray-200 rounded-lg p-4 bg-blue-50/20">
-                                <h4 className="text-sm font-bold text-gray-700 mb-3 flex justify-between">Adjustment Factors <button type="button" onClick={handleAddAdjustment} className="px-2 py-1 bg-blue-500 text-white text-xs rounded"><Plus className="w-3 h-3 inline"/> Add</button></h4>
-                                {adjustmentFactors.map(adj => (
-                                    <div key={adj.id} className="grid grid-cols-12 gap-2 mb-2 items-center">
-                                        <div className="col-span-8"><InputField placeholder="Factor (e.g. Corner Lot)" value={adj.factor_name} onChange={(_e:any, v:string) => handleAdjustmentChange(adj.id, 'factor_name', v)} /></div>
-                                        <div className="col-span-3"><InputField type="number" placeholder="%" value={adj.percent_adjustment} onChange={(_e:any, v:number) => handleAdjustmentChange(adj.id, 'percent_adjustment', v)} /></div>
-                                        <div className="col-span-1"><button type="button" onClick={() => handleRemoveAdjustment(adj.id)} className="text-red-500"><Trash2 className="w-4 h-4"/></button></div>
+                            {/* Land Details */}
+                            {masterData.property_kind === 'Land' && (
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                        <SelectField label="Land Class (PC)" name="pc_code" value={landData.pc_code} onChange={handleSpecificChange(setLandData)} options={PC_NAMES} values={PC_CODES} required />
+                                        <SelectField label="Sub-Class (PSC)" name="psc_code" value={landData.psc_code} onChange={handleSpecificChange(setLandData)} options={LAND_PSC_CODES} required readOnly={!landData.pc_code} />
+                                        <SelectField label="Actual Use (AU)" name="au_code" value={landData.au_code} onChange={handleSpecificChange(setLandData)} options={LAND_AU_CODES} required />
+                                        <InputField label="Lot Area (sqm)" name="lot_area" value={landData.lot_area} onChange={handleSpecificChange(setLandData)} type="number" min="0.01" step="0.01" required />
+                                        <div className="sm:col-span-4"><TextAreaField label="Remarks" name="remarks" value={landData.remarks} onChange={handleSpecificChange(setLandData)} isFullWidth /></div>
                                     </div>
-                                ))}
-                            </div>
-                        )}
+                                    
+                                    <div className="bg-white rounded-lg border border-emerald-200 p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h4 className="text-xs font-bold text-emerald-700 uppercase">Other Improvements</h4>
+                                            <button type="button" onClick={handleAddImprovement} className="px-3 py-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded text-xs font-bold transition flex items-center"><Plus className="w-3 h-3 mr-1"/> Add Item</button>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                            <table className="min-w-full text-sm">
+                                                <thead className="bg-emerald-50 text-emerald-700">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-left">Name</th>
+                                                        <th className="px-3 py-2 text-center w-24">Qty</th>
+                                                        <th className="px-3 py-2 text-right">Unit Val</th>
+                                                        <th className="w-10"></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-emerald-50">
+                                                    {improvements.map(imp => (
+                                                        <tr key={imp.id}>
+                                                            <td className="p-2">
+                                                                <SearchableSelect 
+                                                                    options={landImprovementOptions.map(opt => ({ label: opt.improvement_name, value: opt.improvement_name }))}
+                                                                    value={imp.improvement_name}
+                                                                    onChange={(val) => handleImprovementChange(imp.id, 'improvement_name', val)}
+                                                                    placeholder="Select Improvement..."
+                                                                />
+                                                            </td>
+                                                            <td className="p-2"><input className="w-full border border-slate-300 rounded p-1.5 text-sm text-center outline-none focus:border-emerald-500" type="number" value={imp.quantity} onChange={e=>handleImprovementChange(imp.id, 'quantity', parseInt(e.target.value)||0)} /></td>
+                                                            <td className="p-2"><input className="w-full border border-slate-300 rounded p-1.5 text-sm text-right outline-none focus:border-emerald-500 bg-slate-50 cursor-not-allowed" type="number" step="0.01" value={imp.unit_value} readOnly /></td>
+                                                            <td className="p-2 text-center"><button type="button" onClick={()=>handleRemoveImprovement(imp.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button></td>
+                                                        </tr>
+                                                    ))}
+                                                    {improvements.length === 0 && <tr><td colSpan={4} className="text-center py-4 text-slate-400 italic">No improvements added.</td></tr>}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
 
-                        {/* Building Floors & Items */}
-                        {masterData.property_kind === 'Building' && (
-                            <>
-                                <div className="border border-gray-200 rounded-lg p-4">
-                                    <h4 className="text-sm font-bold text-gray-700 mb-2">Floor Areas</h4>
-                                    <div className="grid grid-cols-3 gap-2">{buildingData.floor_areas.map(f => <BuildingFloorAreaInput key={f.floor_no} floor={f} onChange={handleFloorAreaChange} />)}</div>
+                                    <div className="bg-white rounded-lg border border-slate-200 p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h4 className="text-xs font-bold text-slate-700 uppercase">Adjustment Factors</h4>
+                                            <button type="button" onClick={handleAddAdjustment} className="px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-xs font-bold transition flex items-center"><Plus className="w-3 h-3 mr-1"/> Add</button>
+                                        </div>
+                                        {adjustmentFactors.map(adj => (
+                                            <div key={adj.id} className="grid grid-cols-12 gap-2 mb-2 items-center">
+                                                <div className="col-span-8"><InputField placeholder="Factor (e.g. Corner Lot)" value={adj.factor_name} onChange={(_e:any, v:string) => handleAdjustmentChange(adj.id, 'factor_name', v)} /></div>
+                                                <div className="col-span-3"><InputField type="number" placeholder="%" value={adj.percent_adjustment} onChange={(_e:any, v:number) => handleAdjustmentChange(adj.id, 'percent_adjustment', v)} /></div>
+                                                <div className="col-span-1 text-right"><button type="button" onClick={() => handleRemoveAdjustment(adj.id)} className="text-red-400 hover:text-red-600 p-1.5"><Trash2 className="w-4 h-4"/></button></div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                                <div className="border border-gray-200 rounded-lg p-4">
-                                    <h4 className="text-sm font-bold text-gray-700 mb-2 flex justify-between">Additional Items <button type="button" onClick={handleAddBAI} className="text-xs bg-emerald-500 text-white px-2 py-1 rounded">Add</button></h4>
-                                    {buildingData.additional_items.map(bai => <BuildingAdditionalItemForm key={bai.id} bai={bai} onChange={handleBAIChange} onRemove={handleRemoveBAI} />)}
+                            )}
+
+                            {/* Building Details */}
+                            {masterData.property_kind === 'Building' && (
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                        <SelectField label="Building Kind" name="bk_id" value={buildingData.bk_id} onChange={handleSpecificChange(setBuildingData)} options={BK_CODES} values={BK_VALUES} required />
+                                        <SelectField label="Struct Type" name="st_id" value={buildingData.st_id} onChange={handleSpecificChange(setBuildingData)} options={STRUCTURAL_TYPES} values={STRUCTURAL_VALUES} required />
+                                        <SelectField label="Actual Use" name="bau_id" value={buildingData.bau_id} onChange={handleSpecificChange(setBuildingData)} options={BUILDING_AU_CODES_LIST} values={BUILDING_AU_VALUES} required />
+                                        <InputField label="Storeys" name="no_of_storeys" value={buildingData.no_of_storeys} onChange={handleSpecificChange(setBuildingData)} type="number" min="1" required />
+                                        <InputField label="Year Built" name="year_constructed" value={buildingData.year_constructed} onChange={handleSpecificChange(setBuildingData)} type="number" min="1900" />
+                                        <InputField label="Depreciation Rate %" name="depreciation_rate" value={faasDataState.depreciation_rate} onChange={handleFAASChange} type="number" step="0.01" />
+                                        <div className="sm:col-span-2"><TextAreaField label="Remarks" name="remarks" value={buildingData.remarks} onChange={handleSpecificChange(setBuildingData)} isFullWidth /></div>
+                                    </div>
+                                    
+                                    <div className="bg-white rounded-lg border border-slate-200 p-4">
+                                        <h4 className="text-xs font-bold text-slate-600 uppercase mb-3">Floor Areas</h4>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                            {buildingData.floor_areas.map(f => <BuildingFloorAreaInput key={f.floor_no} floor={f} onChange={handleFloorAreaChange} />)}
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-white rounded-lg border border-slate-200 p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h4 className="text-xs font-bold text-slate-600 uppercase">Structural Materials</h4>
+                                            <button type="button" onClick={handleAddBSM} className="text-xs bg-slate-100 px-3 py-1.5 rounded hover:bg-slate-200 text-slate-700 font-bold flex items-center"><Plus className="w-3 h-3 mr-1"/> Add</button>
+                                        </div>
+                                        {buildingData.structural_materials.map(bsm => <BuildingStructuralMaterialForm key={bsm.id} bsm={bsm} floorCount={buildingData.no_of_storeys as number} onChange={handleBSMChange} onRemove={handleRemoveBSM} />)}
+                                        {buildingData.structural_materials.length===0 && <p className="text-xs text-slate-400 italic text-center py-2">No materials added.</p>}
+                                    </div>
+
+                                    <div className="bg-white rounded-lg border border-slate-200 p-4">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h4 className="text-xs font-bold text-slate-600 uppercase">Additional Items</h4>
+                                            <button type="button" onClick={handleAddBAI} className="text-xs bg-slate-100 px-3 py-1.5 rounded hover:bg-slate-200 text-slate-700 font-bold flex items-center"><Plus className="w-3 h-3 mr-1"/> Add</button>
+                                        </div>
+                                        {buildingData.additional_items.map(bai => 
+                                            <BuildingAdditionalItemForm 
+                                                key={bai.id} 
+                                                bai={bai} 
+                                                onChange={handleBAIChange} 
+                                                onRemove={handleRemoveBAI} 
+                                                options={buildingItemOptions} 
+                                            />)}
+                                        {buildingData.additional_items.length===0 && <p className="text-xs text-slate-400 italic text-center py-2">No items added.</p>}
+                                    </div>
                                 </div>
-                            </>
-                        )}
+                            )}
+
+                            {/* Machinery Form */}
+                            {masterData.property_kind === 'Machinery' && (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                                        <SelectField label="Type" name="mt_id" value={machineryData.mt_id} onChange={handleSpecificChange(setMachineryData)} options={MT_CODES} values={MT_VALUES} required />
+                                        <SelectField label="Actual Use" name="mau_id" value={machineryData.mau_id} onChange={handleSpecificChange(setMachineryData)} options={MAU_CODES} values={MAU_VALUES} required />
+                                        <InputField label="Brand" name="brand_model" value={machineryData.brand_model} onChange={handleSpecificChange(setMachineryData)} />
+                                        <InputField label="Capacity" name="capacity_hp" value={machineryData.capacity_hp} onChange={handleSpecificChange(setMachineryData)} />
+                                        <DatePickerField label="Date Acquired" name="date_acquired" value={machineryData.date_acquired} onChange={handleSpecificChange(setMachineryData)} required/>
+                                        <SelectField label="Condition" name="condition" value={machineryData.condition} onChange={handleSpecificChange(setMachineryData)} options={CONDITION_ENUM_MACHINERY} />
+                                        <InputField label="Economic Life" name="economic_life" value={machineryData.economic_life} onChange={handleSpecificChange(setMachineryData)} type="number" min="1" />
+                                        <YearSelect label="Year Installed" name="year_installed" value={machineryData.year_installed} onChange={handleSpecificChange(setMachineryData)} type="number" />
+                                        <YearSelect label="Year Op" name="year_initial_operation" value={machineryData.year_initial_operation} onChange={handleSpecificChange(setMachineryData)} type="number" required />
+                                        <InputField label="Orig Cost" name="original_cost" value={machineryData.original_cost} onChange={handleSpecificChange(setMachineryData)} type="number" step="0.01" />
+                                        <InputField label="Conv. Factor" name="conversion_factor" value={machineryData.conversion_factor} onChange={handleSpecificChange(setMachineryData)} type="number" step="0.01" />
+                                        <InputField label="Depr Rate %" name="depreciation_rate" value={faasDataState.depreciation_rate} onChange={handleFAASChange} type="number" step="0.01" />
+                                    </div>
+                                </div>
+                            )}
+                        </div>
 
                         {/* Valuation Preview */}
                         <div className="bg-white rounded-xl shadow-sm border-2 border-emerald-100 overflow-hidden">
-                            <div className="bg-emerald-50 px-4 py-3 border-b border-emerald-100 flex items-center">
+                            <div className="bg-emerald-50 px-6 py-4 border-b border-emerald-100 flex items-center">
                                 <Calculator className="w-5 h-5 text-emerald-600 mr-2" />
-                                <h3 className="font-bold text-emerald-800">Valuation Summary</h3>
+                                <h3 className="font-bold text-emerald-800 uppercase tracking-wide text-sm">Valuation Summary</h3>
                             </div>
-                            <div className="p-4 space-y-3 text-sm">
+                            <div className="p-6 space-y-3 text-sm text-slate-700">
                                 <div className="flex justify-between">
-                                    <span className="text-gray-600">Base Market Value</span>
-                                    <span className="font-medium">₱{calculations.baseMarketValue.toLocaleString(undefined, {minimumFractionDigits:2})}</span>
+                                    <span className="font-medium">Base Market Value</span>
+                                    <span className="font-semibold text-slate-900">₱{calculations.baseMarketValue.toLocaleString(undefined, {minimumFractionDigits:2})}</span>
                                 </div>
                                 {calculations.totalAdjustmentPercent !== 0 && (
                                     <div className="flex justify-between text-blue-600">
@@ -1142,28 +1541,47 @@ export const FAASRevisionDialog: React.FC<FAASRevisionDialogProps> = ({
                                         <span>-₱{calculations.depreciationValue?.toLocaleString(undefined, {minimumFractionDigits:2})}</span>
                                     </div>
                                 )}
-                                <div className="border-t border-gray-200 pt-2 mt-2 flex justify-between font-bold text-lg">
+                                <div className="border-t border-slate-200 pt-3 mt-3 flex justify-between font-bold text-lg text-slate-900">
                                     <span>Total Market Value</span>
                                     <span>₱{calculations.totalMarketValue.toLocaleString(undefined, {minimumFractionDigits:2})}</span>
                                 </div>
-                                <div className="flex justify-between items-center pt-2">
-                                    <span className="text-gray-500">Assessment Level</span>
-                                    <input type="number" className="w-20 border rounded text-right p-1" value={assessmentLevel} onChange={(e)=>setAssessmentLevel(parseFloat(e.target.value)||0)} />
+                                <div className="flex justify-between items-center pt-3">
+                                    <span className="font-medium text-slate-600">Assessment Level</span>
+                                    <div className="relative">
+                                        <input type="number" className="w-24 border border-slate-300 rounded-md text-right py-1.5 px-3 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" value={assessmentLevel} onChange={(e)=>setAssessmentLevel(parseFloat(e.target.value)||0)} />
+                                        <span className="absolute right-3 top-1.5 text-slate-400">%</span>
+                                    </div>
                                 </div>
-                                <div className="bg-emerald-100 p-3 rounded-lg flex justify-between items-center font-extrabold text-xl text-emerald-900 mt-2">
+                                <div className="bg-emerald-100 p-4 rounded-xl flex justify-between items-center font-extrabold text-xl text-emerald-900 mt-4 shadow-inner">
                                     <span>ASSESSED VALUE</span>
                                     <span>₱{calculations.assessedValue.toLocaleString(undefined, {minimumFractionDigits:2})}</span>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="flex justify-end pt-4 border-t border-gray-200 space-x-3">
-                            <button type="button" onClick={handleCancel} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
-                            <button type="submit" disabled={submitLoading} className="px-6 py-2 text-sm font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 flex items-center shadow-lg">
-                                {submitLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} <Save className="w-4 h-4 mr-2" /> Confirm Revision
-                            </button>
-                        </div>
+                        {/* Error Message */}
+                        {submitError && (
+                            <div className="p-4 bg-red-50 text-red-700 text-sm rounded-lg flex items-center border border-red-100">
+                                <AlertCircle className="w-5 h-5 mr-2 shrink-0" />
+                                {submitError}
+                            </div>
+                        )}
                     </form>
+                </div>
+
+                {/* Footer */}
+                <div className="p-6 bg-white border-t border-slate-200 flex justify-end gap-3 shrink-0">
+                    <button onClick={handleCancel} className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-50 border border-slate-300 rounded-lg transition" disabled={submitLoading}>
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={handleRevisionSubmit} 
+                        disabled={submitLoading || selectedOwners.length === 0}
+                        className="px-6 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-md transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        {submitLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        Confirm Revision
+                    </button>
                 </div>
             </div>
         </div>

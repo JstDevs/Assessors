@@ -12,98 +12,10 @@ import {
     Search, 
     ChevronDown, 
     Check,
-    Package
+    RotateCcw
 } from 'lucide-react';
-import api from '../../../axiosBase.ts'; // Commented out for standalone preview
 
-// --- MOCK API ---
-// const api = {
-//     get: async (url: string) => {
-        
-//         // 1. Fetch FAAS Record
-//         if (url.includes('faas/')) {
-//             await new Promise(r => setTimeout(r, 600)); 
-//             return {
-//                 data: {
-//                     faas: {
-//                         faas_id: 101,
-//                         faas_no: '2023-09-001-12345',
-//                         owner_name: 'Maria Clara de los Santos',
-//                         property_kind: 'Land',
-//                         status: 'Active'
-//                     },
-//                     land: {
-//                         appraisal: {
-//                             classification: 'Residential',
-//                             subclassification: 'R-1',
-//                             area: '250',
-//                             unit_value: '5000',
-//                             base_market_value: '1250000'
-//                         },
-//                         assessment: {
-//                             actual_use: 'Residential',
-//                             market_value: '1250000',
-//                             assessment_level: '20',
-//                             assessed_value: '250000'
-//                         },
-//                         // Existing improvements on the land
-//                         improvements: [
-//                             { improvement_id: 5, improvement_name: 'Old Wooden Fence', qty: 10, unit_value: '150.00' }
-//                         ]
-//                     }
-//                 }
-//             };
-//         }
-
-//         // 2. Fetch Reference Table for Improvements (Items Only)
-//         // Matches user instruction: "referencing from the database as land improvements now has it's own table"
-//         if (url === 'loi/') {
-//             await new Promise(r => setTimeout(r, 400));
-//             return {
-//                 data: [
-//                     { improvement_id: 1, improvement_name: 'Mango Tree (Grafted)' },
-//                     { improvement_id: 2, improvement_name: 'Coconut Tree (Bearing)' },
-//                     { improvement_id: 3, improvement_name: 'Perimeter Fence (Concrete)' },
-//                     { improvement_id: 4, improvement_name: 'Steel Gate (Standard)' },
-//                     { improvement_id: 5, improvement_name: 'Water Tank (Concrete)' },
-//                     { improvement_id: 6, improvement_name: 'Pavement (Concrete)' },
-//                 ]
-//             };
-//         }
-
-//         // 3. Fetch Unit Value by ID
-//         // Matches user instruction: "router.get('/uv/:improvement_id'..."
-//         const uvMatch = url.match(/loi\/uv\/(\d+)/);
-//         if (uvMatch) {
-//             await new Promise(r => setTimeout(r, 300)); // Quick fetch for UV
-//             const id = parseInt(uvMatch[1]);
-//             const values: Record<number, number> = {
-//                 1: 500.00,
-//                 2: 300.00,
-//                 3: 2500.00,
-//                 4: 5000.00,
-//                 5: 8000.00,
-//                 6: 850.00,
-//             };
-//             // Return array format as per user's backend snippet `res.json(rows)`
-//             return { 
-//                 data: [{ 
-//                     value_id: id * 100, 
-//                     improvement_id: id, 
-//                     unit_value: values[id] || 0, 
-//                     effective_year: 2024 
-//                 }] 
-//             };
-//         }
-
-//         return { data: null };
-//     },
-//     post: async (url: string, payload: any) => {
-//         await new Promise(r => setTimeout(r, 1200));
-//         console.log("POST", url, payload);
-//         return { data: { success: true } };
-//     }
-// };
+import api from '../../../axiosBase.ts'; 
 
 // --- HELPER HOOKS ---
 function useOnClickOutside(ref: React.RefObject<HTMLElement>, handler: (event: MouseEvent | TouchEvent) => void) {
@@ -262,15 +174,12 @@ interface ImprovementItem {
     improvement_id?: number; // Optional link to reference table
     improvement_name: string;
     qty: number;
-    unit_value: number;
-    isLoadingUV?: boolean; // Track loading state for UV fetch
 }
 
 interface FetchedImprovement {
     improvement_id: number;
     improvement_name: string;
     qty: number;
-    unit_value: string;
 }
 
 interface LandDetails {
@@ -278,14 +187,9 @@ interface LandDetails {
         classification: string;
         subclassification: string;
         area: string;
-        unit_value: string;
-        base_market_value: string;
     };
     assessment: {
         actual_use: string;
-        market_value: string;
-        assessment_level: string;
-        assessed_value: string;
     };
     improvements: FetchedImprovement[];
 }
@@ -306,7 +210,6 @@ interface FetchResponse {
 interface ReferenceItem {
     improvement_id: number;
     improvement_name: string;
-    // unit_value removed from here as it is fetched separately
 }
 
 interface FAASImprovementDialogProps {
@@ -315,9 +218,6 @@ interface FAASImprovementDialogProps {
     faasId: number;
     setRefresh: (refresh: any) => void;
 }
-
-// --- HELPER ---
-const formatCurrency = (val: number) => `₱${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
     showDialog,
@@ -334,8 +234,9 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
     const [improvementDate, setImprovementDate] = useState(new Date().toISOString().split('T')[0]);
     const [remarks, setRemarks] = useState('');
     const [newItems, setNewItems] = useState<ImprovementItem[]>([
-        { improvement_name: '', qty: 1, unit_value: 0 }
+        { improvement_name: '', qty: 1 }
     ]);
+    const [removedImprovements, setRemovedImprovements] = useState<number[]>([]);
     
     // UI State
     const [loading, setLoading] = useState(false);
@@ -352,17 +253,19 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
             setError(null);
             setFaasData(null);
             setLandData(null);
+            
             // Reset form
-            setNewItems([{ improvement_name: '', qty: 1, unit_value: 0 }]);
+            setNewItems([{ improvement_name: '', qty: 1 }]);
+            setRemovedImprovements([]);
             setRemarks('');
             setImprovementDate(new Date().toISOString().split('T')[0]);
             setSuccess(false);
 
             try {
-                // Parallel fetch: FAAS Data + Improvement Items List (only list)
+                // Parallel fetch: FAAS Data + Improvement Items List
                 const [resFaas, resRef] = await Promise.all([
                     api.get(`faas/${faasId}`),
-                    api.get(`loi/`) // Updated to fetch just the list
+                    api.get(`loi/`)
                 ]);
 
                 const data: FetchResponse = resFaas.data;
@@ -399,90 +302,71 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
         setNewItems(updated);
     };
 
-    // Updated handler: Fetch Unit Value when an item is selected
-    const handleSelectionChange = async (index: number, id: string | number, originalItem: ReferenceItem) => {
-        // 1. Update name & ID immediately, clear unit value, set loading
+    const handleSelectionChange = (index: number, id: string | number, originalItem: ReferenceItem) => {
         setNewItems(prev => {
             const updated = [...prev];
             updated[index] = {
                 ...updated[index],
                 improvement_id: Number(id),
-                improvement_name: originalItem.improvement_name,
-                unit_value: 0,
-                isLoadingUV: true
+                improvement_name: originalItem.improvement_name
             };
             return updated;
         });
-
-        // 2. Fetch Unit Value from database
-        try {
-            const res = await api.get(`loi/uv/${id}`);
-            // Assuming response matches snippet: [{ ... unit_value: ... }]
-            const fetchedUV = res.data && res.data[0] ? parseFloat(res.data[0].unit_value) : 0;
-
-            // 3. Update state with fetched value
-            setNewItems(prev => {
-                const updated = [...prev];
-                // Only update if the row hasn't changed identity (basic check)
-                if (updated[index] && updated[index].improvement_id === Number(id)) {
-                    updated[index] = {
-                        ...updated[index],
-                        unit_value: fetchedUV,
-                        isLoadingUV: false
-                    };
-                }
-                return updated;
-            });
-        } catch (error) {
-            console.error("Failed to load unit value", error);
-            setNewItems(prev => {
-                const updated = [...prev];
-                if (updated[index]) {
-                    updated[index] = { ...updated[index], isLoadingUV: false };
-                }
-                return updated;
-            });
-        }
     };
 
     const addItem = () => {
-        setNewItems([...newItems, { improvement_name: '', qty: 1, unit_value: 0 }]);
+        setNewItems([...newItems, { improvement_name: '', qty: 1 }]);
     };
 
     const removeItem = (index: number) => {
         if (newItems.length > 1) {
             setNewItems(newItems.filter((_, i) => i !== index));
+        } else {
+            // If it's the last item, just clear it instead of removing the row entirely
+            setNewItems([{ improvement_name: '', qty: 1 }]);
         }
     };
 
-    // Calculate Total Added Value
-    const totalAddedValue = useMemo(() => {
-        return newItems.reduce((sum, item) => sum + (item.qty * item.unit_value), 0);
-    }, [newItems]);
+    const toggleRemoveExisting = (improvementId: number) => {
+        setRemovedImprovements(prev => 
+            prev.includes(improvementId) 
+                ? prev.filter(id => id !== improvementId) 
+                : [...prev, improvementId]
+        );
+    };
 
     const handleSubmit = async () => {
         setError(null);
         
         // Validation
-        const validItems = newItems.filter(i => i.improvement_name.trim() !== '' && i.unit_value > 0);
+        const validItems = newItems.filter(i => i.improvement_name.trim() !== '');
         
-        if (validItems.length === 0) {
-            setError("No new items detected or unit values are missing. Please check your entries.");
+        if (validItems.length === 0 && removedImprovements.length === 0) {
+            setError("No changes detected. Please add new improvements or remove existing ones.");
             return;
         }
 
         setSubmitLoading(true);
-
+        
         try {
+            // console.log({
+            //     faas_id: faasId,
+            //     improvement_items: validItems, // New items to add
+            //     removed_improvements: removedImprovements, // Items to delete
+            //     improvement_date: improvementDate,
+            //     remarks: remarks
+            // })
             await api.post('faas/improvement', {
                 faas_id: faasId,
                 improvement_items: validItems, // New items to add
+                removed_improvements: removedImprovements, // Items to delete
                 improvement_date: improvementDate,
                 remarks: remarks
             });
 
-            setSuccess(true);
-            setRefresh((prev: any) => !prev);
+
+            // setSuccess(true);
+            // setRefresh((prev: any) => !prev);
         } catch (err: any) {
             console.error(err);
             setError(err.response?.data?.message || "Failed to process improvement transaction.");
@@ -567,19 +451,22 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
                                         </p>
                                     </div>
                                 </div>
-                                <div className="text-right">
-                                    <p className="text-xs text-gray-500">Current Market Value</p>
-                                    <p className="text-lg font-bold text-blue-900">{formatCurrency(parseFloat(landData?.assessment.market_value || '0'))}</p>
-                                </div>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 
-                                {/* 2. EXISTING IMPROVEMENTS (Read Only) */}
+                                {/* 2. EXISTING IMPROVEMENTS (With Removal Option) */}
                                 <div className="space-y-3">
-                                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center">
-                                        <CheckCircle className="w-4 h-4 mr-2 text-gray-400" />
-                                        Existing Improvements
+                                    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center justify-between">
+                                        <div className="flex items-center">
+                                            <CheckCircle className="w-4 h-4 mr-2 text-gray-400" />
+                                            Existing Improvements
+                                        </div>
+                                        {removedImprovements.length > 0 && (
+                                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full normal-case font-medium">
+                                                Removing {removedImprovements.length}
+                                            </span>
+                                        )}
                                     </h3>
                                     
                                     {landData?.improvements && landData.improvements.length > 0 ? (
@@ -588,30 +475,42 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
                                                 <thead className="bg-gray-100 text-gray-500 font-semibold border-b">
                                                     <tr>
                                                         <th className="px-4 py-2">Item</th>
-                                                        <th className="px-4 py-2 text-center">Qty</th>
-                                                        <th className="px-4 py-2 text-right">Unit Val</th>
+                                                        <th className="px-4 py-2 text-center w-16">Qty</th>
+                                                        <th className="px-4 py-2 text-center w-16">Action</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-200">
                                                     {landData.improvements.map((imp) => {
+                                                        const isRemoved = removedImprovements.includes(imp.improvement_id);
+                                                        
                                                         return (
-                                                            <tr key={imp.improvement_id}>
-                                                                <td className="px-4 py-2 text-gray-700">
+                                                            <tr key={imp.improvement_id} className={`transition-colors ${isRemoved ? 'bg-red-50/50' : 'hover:bg-gray-100'}`}>
+                                                                <td className={`px-4 py-2 ${isRemoved ? 'text-red-400 line-through' : 'text-gray-700'}`}>
                                                                     {imp.improvement_name}
                                                                 </td>
-                                                                <td className="px-4 py-2 text-center text-gray-500">
+                                                                <td className={`px-4 py-2 text-center ${isRemoved ? 'text-red-400 line-through' : 'text-gray-500'}`}>
                                                                     {imp.qty}
                                                                 </td>
-                                                                <td className="px-4 py-2 text-right text-gray-500">
-                                                                    {formatCurrency(parseFloat(imp.unit_value))}
+                                                                <td className="px-4 py-2 text-center">
+                                                                    <button 
+                                                                        onClick={() => toggleRemoveExisting(imp.improvement_id)}
+                                                                        className={`p-1.5 rounded transition-colors ${
+                                                                            isRemoved 
+                                                                                ? 'text-red-600 hover:bg-red-100' 
+                                                                                : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                                                                        }`}
+                                                                        title={isRemoved ? "Undo Removal" : "Remove Improvement"}
+                                                                    >
+                                                                        {isRemoved ? <RotateCcw size={16} /> : <Trash2 size={16} />}
+                                                                    </button>
                                                                 </td>
                                                             </tr>
                                                         );
                                                     })}
                                                 </tbody>
                                             </table>
-                                            <div className="bg-gray-100 px-4 py-2 text-xs text-gray-500 text-center italic">
-                                                These items will automatically be carried over to the new FAAS.
+                                            <div className="bg-gray-100 px-4 py-2 text-xs text-gray-500 text-center italic border-t border-gray-200">
+                                                Unmarked items will be carried over to the new FAAS.
                                             </div>
                                         </div>
                                     ) : (
@@ -623,14 +522,9 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
 
                                 {/* 3. NEW IMPROVEMENTS FORM */}
                                 <div className="space-y-4">
-                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center justify-between">
-                                        <div className="flex items-center">
-                                            <TrendingUp className="w-4 h-4 mr-2" />
-                                            Add New Improvements
-                                        </div>
-                                        <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full normal-case">
-                                            Total Added: {formatCurrency(totalAddedValue)}
-                                        </span>
+                                    <h3 className="text-sm font-bold text-green-700 uppercase tracking-wide flex items-center">
+                                        <TrendingUp className="w-4 h-4 mr-2" />
+                                        Add New Improvements
                                     </h3>
 
                                     <div className="space-y-3">
@@ -638,8 +532,8 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
                                             <div key={index} className="flex gap-2 items-start animate-in slide-in-from-left-2 duration-200">
                                                 <div className="flex-1 grid grid-cols-12 gap-2">
                                                     
-                                                    {/* SEARCHABLE SELECT REPLACEMENT */}
-                                                    <div className="col-span-6">
+                                                    {/* SEARCHABLE SELECT */}
+                                                    <div className="col-span-9">
                                                         <SearchableSelect 
                                                             options={referenceItems.map(ref => ({
                                                                 id: ref.improvement_id,
@@ -652,7 +546,7 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
                                                         />
                                                     </div>
 
-                                                    <div className="col-span-2">
+                                                    <div className="col-span-3">
                                                         <input 
                                                             type="number" 
                                                             placeholder="Qty" 
@@ -662,31 +556,11 @@ export const FAASImprovementDialog: React.FC<FAASImprovementDialogProps> = ({
                                                             onChange={(e) => handleItemChange(index, 'qty', parseInt(e.target.value) || 0)}
                                                         />
                                                     </div>
-                                                    <div className="col-span-4">
-                                                        <div className="relative">
-                                                            <span className="absolute left-2 top-2 text-gray-400 text-xs">₱</span>
-                                                            <input 
-                                                                type="number" 
-                                                                placeholder="Unit Val" 
-                                                                min="0"
-                                                                step="0.01"
-                                                                className={`w-full border border-gray-300 rounded-lg p-2 pl-5 text-sm text-right focus:ring-2 focus:ring-green-500 outline-none font-mono ${item.isLoadingUV ? 'bg-gray-100 text-gray-400' : 'bg-white'}`}
-                                                                value={item.unit_value}
-                                                                onChange={(e) => handleItemChange(index, 'unit_value', parseFloat(e.target.value) || 0)}
-                                                                readOnly={item.isLoadingUV}
-                                                            />
-                                                            {item.isLoadingUV && (
-                                                                <div className="absolute right-2 top-2">
-                                                                    <Loader2 size={16} className="animate-spin text-emerald-500" />
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
                                                 </div>
                                                 <button 
                                                     onClick={() => removeItem(index)}
-                                                    className={`p-2 rounded-lg transition ${newItems.length > 1 ? 'text-gray-400 hover:text-red-500 hover:bg-red-50' : 'text-gray-200 cursor-not-allowed'}`}
-                                                    disabled={newItems.length <= 1}
+                                                    className={`p-2 rounded-lg transition ${newItems.length > 1 || item.improvement_name !== '' ? 'text-gray-400 hover:text-red-500 hover:bg-red-50' : 'text-gray-200 cursor-not-allowed'}`}
+                                                    disabled={newItems.length <= 1 && item.improvement_name === ''}
                                                 >
                                                     <Trash2 className="w-5 h-5" />
                                                 </button>

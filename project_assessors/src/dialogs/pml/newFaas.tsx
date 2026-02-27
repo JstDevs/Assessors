@@ -163,6 +163,7 @@ export const OriginalFaas: React.FC<FAASCreationDialogProps> = ({
 
                     const smv_data = await api.get('smv/buildingSMV', { params: { bk_id, st_id, ry_id: 1 } })
                     const smv_building = smv_data.data.data;
+                    console.log(smv_data.data);
 
                     
                     
@@ -170,7 +171,7 @@ export const OriginalFaas: React.FC<FAASCreationDialogProps> = ({
                         ...prev,
                         property_id: property.property_id,
                         area: totalFloorArea,
-                        unit_value: parseFloat(smv_building.unit_value || '0'),
+                        unit_value: parseFloat(smv_building?.unit_value || '0'),
                     }));
                     setAssessmentLevel(parseFloat(property?.details?.assessment_level));
                 } else if (property.property_kind === 'Machinery') {
